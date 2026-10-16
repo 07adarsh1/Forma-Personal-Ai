@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { openDB } from 'idb';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { MessageSquare, Plus, Search, Settings2, PanelLeftClose, PanelLeftOpen, Paperclip, ArrowUp, Sparkles, BriefcaseBusiness, FileText, Lightbulb, Code2, X, ChevronDown, MoreHorizontal, Copy, Check, Trash2, KeyRound, SlidersHorizontal, UserRound, Eye, EyeOff, Upload, SquarePen, GitBranch, RotateCcw, Menu, AlertCircle, LoaderCircle, Command, Globe2, ShieldCheck, Sun, Moon, Download, Image as ImageIcon, File, Mic, AudioLines, Archive, Pin, Maximize2 } from 'lucide-react';
+import { MessageSquare, Plus, Search, Settings2, PanelLeftClose, PanelLeftOpen, Paperclip, ArrowUp, Sparkles, BriefcaseBusiness, FileText, Lightbulb, Code2, X, ChevronDown, MoreHorizontal, Copy, Check, Trash2, KeyRound, SlidersHorizontal, UserRound, Eye, EyeOff, Upload, SquarePen, GitBranch, RotateCcw, Menu, AlertCircle, LoaderCircle, Command, Globe2, ShieldCheck, Sun, Moon, Download, Image as ImageIcon, File, Mic, AudioLines, Archive, Pin, Maximize2, Play, ExternalLink, Monitor, Tablet, Smartphone } from 'lucide-react';
 
 const DEFAULT_SETTINGS = { name: 'Ari', persona: 'You are Ari, a thoughtful, sharp and encouraging personal assistant. Be warm but never overly agreeable. Give clear, useful answers. If the user shares a resume or other documents, use them as the source of truth. Be honest about what you don’t know.', temperature: 0.7, systemPrompt: '', maxTokens: 2048, unlimitedOutput: false, theme: 'dark' };
 const CHAT_KEY = 'forma.chats.v1'; const SET_KEY = 'forma.settings.v1'; const PROVIDER_KEY = 'forma.providers.v1';
@@ -380,12 +380,119 @@ function MarkdownContent({ content }) {
   return <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ pre: CopyableCodeBlock }}>{content}</ReactMarkdown>;
 }
 
+function extractCodeSource(node) {
+  if (!node) return '';
+  if (typeof node === 'string') return node;
+  if (Array.isArray(node)) return node.map(extractCodeSource).join('');
+  if (node?.props?.children) return extractCodeSource(node.props.children);
+  return String(node);
+}
+
+function buildHtmlPreviewDoc(rawCode) {
+  const trimmed = rawCode.trim();
+  const isSvg = /^\s*<svg[\s\S]*<\/svg>\s*$/i.test(trimmed);
+  if (isSvg) {
+    return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #ffffff;
+      overflow: auto;
+    }
+    svg {
+      max-width: 90%;
+      max-height: 90%;
+      height: auto;
+    }
+  </style>
+</head>
+<body>
+  ${rawCode}
+</body>
+</html>`;
+  }
+
+  const errorCatchScript = `
+<script>
+  window.addEventListener('error', function(e) {
+    var b = document.getElementById('__forma_preview_err__');
+    if (!b) {
+      b = document.createElement('div');
+      b.id = '__forma_preview_err__';
+      b.style.cssText = 'position:fixed;bottom:10px;left:10px;right:10px;background:#ef4444;color:#ffffff;padding:8px 12px;border-radius:6px;font-family:system-ui,-apple-system,sans-serif;font-size:12px;z-index:999999;box-shadow:0 4px 12px rgba(0,0,0,0.3);';
+      document.body.appendChild(b);
+    }
+    b.textContent = 'Preview error: ' + (e.message || 'Script error');
+  });
+</script>`;
+
+  if (/<!DOCTYPE\s+html/i.test(rawCode) || /<html[\s>]/i.test(rawCode)) {
+    if (/<\/head>/i.test(rawCode)) return rawCode.replace(/<\/head>/i, `${errorCatchScript}</head>`);
+    if (/<\/body>/i.test(rawCode)) return rawCode.replace(/<\/body>/i, `${errorCatchScript}</body>`);
+    return rawCode + errorCatchScript;
+  }
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      margin: 0;
+      padding: 16px;
+      color: #111827;
+      background: #ffffff;
+      line-height: 1.5;
+    }
+  </style>
+  ${errorCatchScript}
+</head>
+<body>
+  ${rawCode}
+</body>
+</html>`;
+}
+
 function CopyableCodeBlock({ children }) {
   const [copied, setCopied] = useState(false);
+  const [viewMode, setViewMode] = useState('code');
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [viewport, setViewport] = useState('desktop');
+  const [refreshKey, setRefreshKey] = useState(0);
+
   const codeNode = Array.isArray(children) ? children[0] : children;
   const className = codeNode?.props?.className || '';
   const language = className.match(/language-([\w+-]+)/)?.[1] || 'Code';
-  const source = String(codeNode?.props?.children || '').replace(/\n$/, '');
+  const source = extractCodeSource(codeNode?.props?.children).replace(/\n$/, '');
+
+  const langLower = language.toLowerCase();
+  const isExplicitHtml = ['html', 'htm', 'svg'].includes(langLower);
+  const isMarkup = /^\s*<!DOCTYPE\s+html/i.test(source) || /^\s*<html[\s>]/i.test(source) || (/<\/?[a-z][\s\S]*>/i.test(source) && ['xml', 'markup', 'code', ''].includes(langLower));
+  const isPreviewable = isExplicitHtml || isMarkup;
+
+  useEffect(() => {
+    if (!isFullscreen) return;
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') setIsFullscreen(false);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isFullscreen]);
+
   const copy = async () => {
     try {
       await copyText(source);
@@ -395,8 +502,173 @@ function CopyableCodeBlock({ children }) {
       console.error('Could not copy code', error);
     }
   };
-  return <div className="copyable-code-card">
-    <header className="copyable-card-head"><span>{language}</span><button title={copied ? 'Copied' : 'Copy code'} aria-label={copied ? 'Copied' : 'Copy code'} onClick={copy}>{copied ? <Check size={17}/> : <Copy size={17}/>}</button></header>
-    <pre>{children}</pre>
-  </div>;
+
+  const openInNewTab = () => {
+    const doc = buildHtmlPreviewDoc(source);
+    const blob = new Blob([doc], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank');
+  };
+
+  const downloadFile = () => {
+    const extMap = {
+      html: 'html', htm: 'html', svg: 'svg', javascript: 'js', js: 'js',
+      typescript: 'ts', ts: 'ts', css: 'css', json: 'json', python: 'py',
+      py: 'py', markdown: 'md', md: 'md', sh: 'sh', bash: 'sh', sql: 'sql'
+    };
+    const ext = extMap[langLower] || (isPreviewable ? 'html' : 'txt');
+    const mime = ext === 'html' ? 'text/html' : ext === 'svg' ? 'image/svg+xml' : 'text/plain';
+    const content = isPreviewable && (langLower === 'html' || langLower === 'htm') ? buildHtmlPreviewDoc(source) : source;
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `forma-${Date.now().toString(36)}.${ext}`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div className={`copyable-code-card ${isPreviewable ? 'has-preview' : ''}`}>
+      <header className="copyable-card-head html-card-head">
+        <div className="code-head-left">
+          <span className="code-lang-tag">{language}</span>
+          {isPreviewable && (
+            <div className="code-view-tabs" role="tablist">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={viewMode === 'code'}
+                className={`code-view-tab ${viewMode === 'code' ? 'active' : ''}`}
+                onClick={() => setViewMode('code')}
+                title="View HTML Source Code"
+              >
+                <Code2 size={13} />
+                <span>Code</span>
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={viewMode === 'preview'}
+                className={`code-view-tab ${viewMode === 'preview' ? 'active' : ''}`}
+                onClick={() => setViewMode('preview')}
+                title="Run & Preview HTML"
+              >
+                <Play size={13} />
+                <span>Preview</span>
+              </button>
+            </div>
+          )}
+        </div>
+        <div className="copyable-card-actions">
+          {isPreviewable && viewMode === 'preview' && (
+            <>
+              <button title="Refresh preview" aria-label="Refresh preview" onClick={() => setRefreshKey(k => k + 1)}>
+                <RotateCcw size={15} />
+              </button>
+              <button title="Expand to fullscreen modal" aria-label="Expand preview" onClick={() => setIsFullscreen(true)}>
+                <Maximize2 size={15} />
+              </button>
+              <button title="Open preview in new tab" aria-label="Open in new tab" onClick={openInNewTab}>
+                <ExternalLink size={15} />
+              </button>
+            </>
+          )}
+          <button title={isPreviewable ? "Download HTML file" : "Download code file"} aria-label="Download code" onClick={downloadFile}>
+            <Download size={15} />
+          </button>
+          <button title={copied ? 'Copied' : 'Copy code'} aria-label={copied ? 'Copied' : 'Copy code'} onClick={copy}>
+            {copied ? <Check size={16} /> : <Copy size={16} />}
+          </button>
+        </div>
+      </header>
+
+      {isPreviewable && viewMode === 'preview' ? (
+        <div className="html-inline-preview-wrap">
+          <iframe
+            key={`inline-${refreshKey}`}
+            title="HTML Live Preview"
+            srcDoc={buildHtmlPreviewDoc(source)}
+            sandbox="allow-scripts allow-modals allow-forms allow-popups"
+            className="html-preview-iframe"
+          />
+        </div>
+      ) : (
+        <pre>{children}</pre>
+      )}
+
+      {isFullscreen && (
+        <div
+          className="prompt-preview-backdrop html-modal-backdrop"
+          role="presentation"
+          onMouseDown={e => { if (e.target === e.currentTarget) setIsFullscreen(false); }}
+        >
+          <section className="prompt-preview-dialog html-preview-modal-dialog" role="dialog" aria-modal="true" aria-label="Interactive HTML Sandbox">
+            <header className="copyable-card-head html-modal-head">
+              <div className="html-modal-title-group">
+                <span className="html-modal-badge">Interactive Preview</span>
+                <div className="html-viewport-switcher" role="group" aria-label="Device viewport">
+                  <button
+                    type="button"
+                    className={`viewport-btn ${viewport === 'desktop' ? 'active' : ''}`}
+                    title="Desktop view (100%)"
+                    onClick={() => setViewport('desktop')}
+                  >
+                    <Monitor size={14} />
+                    <span>Desktop</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`viewport-btn ${viewport === 'tablet' ? 'active' : ''}`}
+                    title="Tablet view (768px)"
+                    onClick={() => setViewport('tablet')}
+                  >
+                    <Tablet size={14} />
+                    <span>Tablet</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`viewport-btn ${viewport === 'mobile' ? 'active' : ''}`}
+                    title="Mobile view (375px)"
+                    onClick={() => setViewport('mobile')}
+                  >
+                    <Smartphone size={14} />
+                    <span>Mobile</span>
+                  </button>
+                </div>
+              </div>
+              <div className="copyable-card-actions">
+                <button title="Refresh preview" aria-label="Refresh preview" onClick={() => setRefreshKey(k => k + 1)}>
+                  <RotateCcw size={16} />
+                </button>
+                <button title="Open in new browser tab" aria-label="Open in new browser tab" onClick={openInNewTab}>
+                  <ExternalLink size={16} />
+                </button>
+                <button title="Download HTML" aria-label="Download HTML" onClick={downloadFile}>
+                  <Download size={16} />
+                </button>
+                <button title="Close preview" aria-label="Close preview" onClick={() => setIsFullscreen(false)}>
+                  <X size={19} />
+                </button>
+              </div>
+            </header>
+            <div className={`html-modal-body viewport-${viewport}`}>
+              <div className="html-modal-frame-wrapper">
+                <iframe
+                  key={`modal-${refreshKey}`}
+                  title="HTML Fullscreen Preview"
+                  srcDoc={buildHtmlPreviewDoc(source)}
+                  sandbox="allow-scripts allow-modals allow-forms allow-popups"
+                  className="html-preview-iframe"
+                />
+              </div>
+            </div>
+          </section>
+        </div>
+      )}
+    </div>
+  );
 }
+
