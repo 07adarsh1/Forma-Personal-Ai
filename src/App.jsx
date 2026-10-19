@@ -497,6 +497,7 @@ export default function App() {
   const activeChat = chats.find(c => c.id === activeId);
   const activeLibrarySources = library.filter(source => activeChat?.librarySourceIds?.includes(source.id));
   const activeProvider = providers.find(p => p.id === activeProviderId) || providers[0] || DEFAULT_PROVIDER;
+  const editingProvider = providers.find(p => p.id === editingProviderId) || activeProvider || DEFAULT_PROVIDER;
   const isDefaultActive = activeProvider.id === DEFAULT_PROVIDER.id || activeProvider.baseUrl === DEFAULT_PROVIDER.baseUrl;
   const activeProviderConfigured = Boolean(activeProvider.enabled !== false && (activeProvider.apiKey || isDefaultActive) && activeProvider.baseUrl && activeProvider.model);
   const appTheme = settings.theme === 'system' ? (prefersDark ? 'dark' : 'light') : settings.theme;
