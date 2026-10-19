@@ -6,7 +6,8 @@ import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 import mermaid from 'mermaid';
-import { MessageSquare, Plus, Search, Settings2, PanelLeftClose, PanelLeftOpen, Paperclip, ArrowUp, Sparkles, BriefcaseBusiness, FileText, Lightbulb, Code2, X, ChevronDown, ChevronUp, ChevronRight, ChevronLeft, MoreHorizontal, Copy, Check, Trash2, KeyRound, SlidersHorizontal, UserRound, Eye, EyeOff, Upload, SquarePen, GitBranch, RotateCcw, Menu, AlertCircle, LoaderCircle, Command, Globe2, ShieldCheck, Sun, Moon, Download, Image as ImageIcon, File, Mic, AudioLines, Archive, Pin, Maximize2, Minimize2, Play, ExternalLink, Monitor, Tablet, Smartphone, Bookmark, ArrowDown, Compass, ListOrdered, Columns2, ArrowLeft, ZoomIn, ZoomOut, Move, Terminal } from 'lucide-react';
+import { MessageSquare, Plus, Search, Settings2, PanelLeftClose, PanelLeftOpen, Paperclip, ArrowUp, Sparkles, BriefcaseBusiness, FileText, Lightbulb, Code2, X, ChevronDown, ChevronUp, ChevronRight, ChevronLeft, MoreHorizontal, Copy, Check, Trash2, KeyRound, SlidersHorizontal, UserRound, Eye, EyeOff, Upload, SquarePen, GitBranch, RotateCcw, Menu, AlertCircle, LoaderCircle, Command, Globe2, ShieldCheck, Sun, Moon, Download, Image as ImageIcon, File, Mic, AudioLines, Archive, Pin, Maximize2, Minimize2, Play, ExternalLink, Monitor, Tablet, Smartphone, Bookmark, ArrowDown, Compass, ListOrdered, Columns2, ArrowLeft, ZoomIn, ZoomOut, Move, Terminal, Flame } from 'lucide-react';
+import { EXPLICIT_PERSONA_ID, EXPLICIT_SYSTEM_PROMPT } from '../api/personas.js';
 
 
 export const CanvasContext = createContext({
@@ -107,6 +108,25 @@ export const BUILTIN_PERSONAS = [
       { icon: Lightbulb, title: 'Brand positioning manifesto', text: 'Draft a bold 3-paragraph brand manifesto that positions us against legacy incumbents.' },
       { icon: Code2, title: 'Product launch tweet thread', text: 'Write a 6-part viral launch thread detailing the story and engineering behind our product.' },
     ]
+  },
+  {
+    id: EXPLICIT_PERSONA_ID,
+    name: 'Explicit',
+    badge: '18+ Adult',
+    isAdult: true,
+    tagline: 'No filter. No fake politeness.',
+    description: 'A bold, mature AI personality for raw conversations, vulgar humor, dark comedy, cheeky banter, adult discussions, and brutally honest answers.',
+    avatar: '🔥',
+    avatarIcon: Flame,
+    temperature: 0.85,
+    persona: EXPLICIT_SYSTEM_PROMPT,
+    systemPrompt: 'No filter, no fake politeness. Profanity, raw humor, and mature language are permitted. Deliver direct, accurate, and brutally honest answers without moralizing lectures.',
+    starters: [
+      { icon: Flame, title: 'Brutally honest roast', text: 'Roast my daily routine with zero sugar-coating and unfiltered sarcasm.' },
+      { icon: Sparkles, title: 'Unfiltered dark humor', text: 'Tell me a dark comedy joke with zero corporate sanitization.' },
+      { icon: MessageSquare, title: 'No-BS life advice', text: 'Give me your rawest, no-filter take on dealing with workplace burnout.' },
+      { icon: Code2, title: 'C++ binary search (no fluff)', text: 'Explain binary search in C++ with optimal code, zero filler, and straight-to-the-point explanation.' },
+    ]
   }
 ];
 const starterPrompts = BUILTIN_PERSONAS[0].starters;
@@ -158,7 +178,7 @@ const readProviderStore = () => {
   const profile = { ...DEFAULT_PROVIDER, name: legacy.providerName || providerLabel(legacy.baseUrl), baseUrl: legacy.baseUrl || DEFAULT_PROVIDER.baseUrl, model, models: [{ id: `${DEFAULT_PROVIDER.id}-model`, name: model, enabled: true }], activeModelId: `${DEFAULT_PROVIDER.id}-model`, apiKey: legacy.apiKey || DEFAULT_PROVIDER.apiKey, extraHeaders: legacy.extraHeaders || '' };
   return { profiles: [profile], activeId: profile.id };
 };
-const newChat = () => ({ id: uid(), title: 'New conversation', messages: [], updatedAt: Date.now() });
+const newChat = (personaId) => ({ id: uid(), title: 'New conversation', messages: [], personaId: personaId || null, updatedAt: Date.now() });
 const fileIcon = (type) => type?.startsWith('image/') ? ImageIcon : FileText;
 
 export default function App() {
@@ -204,6 +224,8 @@ export default function App() {
     return match ? match.id : BUILTIN_PERSONAS[0].id;
   });
   const [personaModalOpen, setPersonaModalOpen] = useState(false);
+  const [ageNoticeOpen, setAgeNoticeOpen] = useState(false);
+  const [pendingPersona, setPendingPersona] = useState(null);
   const [installPrompt, setInstallPrompt] = useState(null);
   const [isInstalled, setIsInstalled] = useState(false);
 
@@ -248,7 +270,7 @@ export default function App() {
     }
   };
 
-  const selectPersona = (p) => {
+  const activatePersonaDirectly = (p) => {
     setActivePersonaId(p.id);
     patchSettings({
       name: p.name,
@@ -256,8 +278,38 @@ export default function App() {
       systemPrompt: p.systemPrompt || '',
       temperature: typeof p.temperature === 'number' ? p.temperature : settings.temperature,
     });
+    if (activeId) {
+      updateChat(activeId, c => ({ ...c, personaId: p.id }));
+    }
     setToast(`Active persona: ${p.name}`);
     setPersonaModalOpen(false);
+    setAgeNoticeOpen(false);
+  };
+
+  const selectPersona = (p) => {
+    const isAdultPersona = p.isAdult || p.id === EXPLICIT_PERSONA_ID || p.id === 'explicit';
+    if (isAdultPersona) {
+      const isConfirmed = localStorage.getItem('forma.explicit_age_confirmed') === 'true' || Boolean(settings.explicitAgeConfirmed);
+      if (!isConfirmed) {
+        setPendingPersona(p);
+        setAgeNoticeOpen(true);
+        return;
+      }
+    }
+    activatePersonaDirectly(p);
+  };
+
+  const handleConfirmAge = () => {
+    try {
+      localStorage.setItem('forma.explicit_age_confirmed', 'true');
+    } catch {}
+    patchSettings({ explicitAgeConfirmed: true });
+    if (pendingPersona) {
+      activatePersonaDirectly(pendingPersona);
+      setPendingPersona(null);
+    } else {
+      setAgeNoticeOpen(false);
+    }
   };
 
   const saveCustomPersona = (newPersona) => {
@@ -473,6 +525,21 @@ export default function App() {
   useEffect(() => { const media = window.matchMedia?.('(prefers-color-scheme: dark)'); if (!media) return; const update = e => setPrefersDark(e.matches); media.addEventListener?.('change', update); return () => media.removeEventListener?.('change', update); }, []);
   useEffect(() => { if (toast) { const t = setTimeout(() => setToast(''), 2600); return () => clearTimeout(t); } }, [toast]);
   useEffect(() => {
+    if (activeChat?.personaId) {
+      const match = customPersonas.find(p => p.id === activeChat.personaId) ||
+                    BUILTIN_PERSONAS.find(p => p.id === activeChat.personaId);
+      if (match && match.id !== activePersonaId) {
+        setActivePersonaId(match.id);
+        patchSettings({
+          name: match.name,
+          persona: match.persona,
+          systemPrompt: match.systemPrompt || '',
+          temperature: typeof match.temperature === 'number' ? match.temperature : settings.temperature,
+        });
+      }
+    }
+  }, [activeId, activeChat?.personaId]);
+  useEffect(() => {
     const onShortcut = e => {
       const key = e.key.toLowerCase();
       if ((e.metaKey || e.ctrlKey) && key === 'k') {
@@ -514,7 +581,7 @@ export default function App() {
   const toggleModel = (modelId) => { const current = editingProvider.models || []; const item = current.find(m => m.id === modelId); if (!item) return; const enabling = item.enabled === false; if (!enabling && current.filter(m => m.enabled !== false).length <= 1) { setToast('Keep at least one model enabled'); return; } const next = current.find(m => m.id !== modelId && m.enabled !== false); setProviders(list => list.map(p => { if (p.id !== editingProviderId) return p; const models = p.models.map(m => m.id === modelId ? { ...m, enabled: enabling } : m); const selected = p.activeModelId === modelId && !enabling ? next : null; return { ...p, models, ...(selected ? { model: selected.name, activeModelId: selected.id } : {}) }; })); };
   const removeModel = (modelId) => { const current = editingProvider.models || []; if (current.length <= 1) { setToast('Add another model before removing this one'); return; } const next = current.find(m => m.id !== modelId && m.enabled !== false); if (editingProvider.activeModelId === modelId && !next) { setToast('Enable another model before removing the selected one'); return; } setProviders(list => list.map(p => { if (p.id !== editingProviderId) return p; const models = p.models.filter(m => m.id !== modelId); const fallback = p.activeModelId === modelId ? next : null; return { ...p, models, ...(fallback ? { model: fallback.name, activeModelId: fallback.id } : {}) }; })); };
   const applyProviderPreset = (key) => { const presets = { openai: { name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini' }, openrouter: { name: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', model: 'openai/gpt-4o-mini' }, google: { name: 'Gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', model: 'gemini-2.0-flash' } }; const preset = presets[key]; if (!preset) return; const models = editingProvider.models || []; const existing = models.find(m => m.name === preset.model); const model = existing ? { ...existing, enabled: true } : { id: uid(), name: preset.model, enabled: true }; const nextModels = existing ? models.map(m => m.id === existing.id ? model : m) : [...models, model]; setProviders(list => list.map(p => p.id === editingProviderId ? { ...p, name: preset.name, baseUrl: preset.baseUrl, model: preset.model, models: nextModels, activeModelId: model.id } : p)); };
-  const makeChat = () => { const c = newChat(); setChats(prev => [c, ...prev]); setActiveId(c.id); setShowArchived(false); setInput(''); setFiles([]); setMobileSidebar(false); textareaRef.current?.focus(); };
+  const makeChat = () => { const c = newChat(activePersonaId); setChats(prev => [c, ...prev]); setActiveId(c.id); setShowArchived(false); setInput(''); setFiles([]); setMobileSidebar(false); textareaRef.current?.focus(); };
   const removeChat = (id, e) => { e?.stopPropagation(); setChats(prev => prev.filter(c => c.id !== id)); if (activeId === id) setActiveId(chats.find(c => c.id !== id && !c.archived)?.id || null); setChatMenuId(null); setDeleteChatId(null); };
   const jumpToMessage = id => {
     setActiveMarkerId(id);
@@ -635,7 +702,7 @@ export default function App() {
         versions: [{ id: uid(), content: '', createdAt: Date.now() }],
         activeVersionIndex: 0
       };
-      updateChat(chat.id, c => ({ ...c, title, messages: [...c.messages, userMsg, assistantMsg], updatedAt: Date.now() }));
+      updateChat(chat.id, c => ({ ...c, personaId: c.personaId || activePersonaId, title, messages: [...c.messages, userMsg, assistantMsg], updatedAt: Date.now() }));
     }
 
     setInput(''); setFiles([]); setBusy(true);
@@ -684,28 +751,60 @@ export default function App() {
       if (!settings.unlimitedOutput) payload.max_tokens = Number(settings.maxTokens);
 
       const requestHeaders = { 'Content-Type': 'application/json', Authorization: `Bearer ${activeProvider.apiKey}`, ...extraHeaders };
+      const isExplicitActive = activePersonaId === EXPLICIT_PERSONA_ID || activePersonaId === 'explicit';
+      const proxyPayload = {
+        endpoint,
+        headers: requestHeaders,
+        body: payload,
+        personaId: activePersonaId,
+        libraryContext: libraryInstruction || undefined
+      };
+      const proxyHeaders = {
+        'Content-Type': 'application/json',
+        'x-persona-id': activePersonaId || ''
+      };
+
       let res;
-      try {
-        res = await fetch(endpoint, { method: 'POST', signal: controller.signal, headers: requestHeaders, body: JSON.stringify(payload) });
-      } catch (directErr) {
-        if (directErr.name === 'AbortError') throw directErr;
+      if (isExplicitActive) {
+        // Enforce server-side prompt injection and policy compliance through backend proxy
         try {
           res = await fetch('/api/proxy', {
             method: 'POST',
             signal: controller.signal,
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ endpoint, headers: requestHeaders, body: payload })
+            headers: proxyHeaders,
+            body: JSON.stringify(proxyPayload)
           });
           if (res.status === 404 || res.status === 405) {
-            throw new Error(`Direct connection was blocked by CORS (${directErr.message}), and /api/proxy is not available on this server.`);
+            // Standalone client fallback if backend proxy route is unavailable
+            res = await fetch(endpoint, { method: 'POST', signal: controller.signal, headers: requestHeaders, body: JSON.stringify(payload) });
           }
         } catch (proxyErr) {
           if (proxyErr.name === 'AbortError') throw proxyErr;
-          throw new Error(
-            `Connection error: Unable to reach ${activeProvider.name || activeProvider.baseUrl}. ` +
-            `This happens when the API provider does not allow browser requests from deployed domains (CORS error). ` +
-            `Ensure your serverless proxy (/api/proxy) is deployed, or use a CORS-enabled provider like OpenRouter or Gemini.`
-          );
+          res = await fetch(endpoint, { method: 'POST', signal: controller.signal, headers: requestHeaders, body: JSON.stringify(payload) });
+        }
+      } else {
+        try {
+          res = await fetch(endpoint, { method: 'POST', signal: controller.signal, headers: requestHeaders, body: JSON.stringify(payload) });
+        } catch (directErr) {
+          if (directErr.name === 'AbortError') throw directErr;
+          try {
+            res = await fetch('/api/proxy', {
+              method: 'POST',
+              signal: controller.signal,
+              headers: proxyHeaders,
+              body: JSON.stringify(proxyPayload)
+            });
+            if (res.status === 404 || res.status === 405) {
+              throw new Error(`Direct connection was blocked by CORS (${directErr.message}), and /api/proxy is not available on this server.`);
+            }
+          } catch (proxyErr) {
+            if (proxyErr.name === 'AbortError') throw proxyErr;
+            throw new Error(
+              `Connection error: Unable to reach ${activeProvider.name || activeProvider.baseUrl}. ` +
+              `This happens when the API provider does not allow browser requests from deployed domains (CORS error). ` +
+              `Ensure your serverless proxy (/api/proxy) is deployed, or use a CORS-enabled provider like OpenRouter or Gemini.`
+            );
+          }
         }
       }
 
@@ -1047,18 +1146,23 @@ export default function App() {
                 <div className="welcome-wrap">
                   <div className="welcome-content">
                     <div
-                      className="welcome-persona-badge"
+                      className={`welcome-persona-badge ${currentPersona.id === EXPLICIT_PERSONA_ID || currentPersona.id === 'explicit' ? 'is-explicit' : ''}`}
                       onClick={() => setPersonaModalOpen(true)}
                       role="button"
                       tabIndex={0}
                       title="Switch AI persona preset & templates"
                       onKeyDown={e => { if (e.key === 'Enter') setPersonaModalOpen(true); }}
                     >
-                      <span className="persona-badge-avatar">{currentPersona.avatar}</span>
+                      <span className="persona-badge-avatar">
+                        {currentPersona.avatarIcon ? <currentPersona.avatarIcon size={16} /> : currentPersona.avatar}
+                      </span>
                       <span className="persona-badge-info">
                         <span className="persona-badge-name">{settings.name || currentPersona.name}</span>
                         <span className="persona-badge-role">{currentPersona.badge || 'Assistant'}</span>
                       </span>
+                      {(currentPersona.isAdult || currentPersona.id === EXPLICIT_PERSONA_ID) && (
+                        <span className="persona-age-pill">18+</span>
+                      )}
                       <span className="persona-badge-action">
                         <span>Switch Persona</span>
                         <ChevronRight size={13} />
@@ -1294,7 +1398,7 @@ export default function App() {
             )}
           </div>
           <div className="composer-area"><div className="composer-wrap"><div className="file-previews">{files.map(f => { const Icon = fileIcon(f.type); return <div className="file-chip" key={f.id}>{f.image && f.dataUrl ? <img src={f.dataUrl} alt=""/> : <span className="file-chip-icon"><Icon size={15}/></span>}<span className="file-chip-text"><b>{f.name}</b><small>{formatSize(f.size)}</small></span><button onClick={() => setFiles(v => v.filter(x => x.id !== f.id))}><X size={13}/></button></div>; })}</div>
-            <div className="composer"><textarea ref={textareaRef} rows="1" placeholder={activeChat?.messages?.length ? 'Message Ari…' : 'Ask anything, or start with a file…'} value={input} onChange={e => { setInput(e.target.value); e.target.style.height = 'auto'; e.target.style.height = `${Math.min(e.target.scrollHeight, 180)}px`; }} onKeyDown={handleKeyDown}/><div className="composer-toolbar"><div className="composer-tools"><button className="tool-btn attach-btn" onClick={() => fileRef.current?.click()} title="Attach files"><Paperclip size={17}/><span>Attach</span></button><input ref={fileRef} type="file" multiple hidden onChange={e => { onFiles(e.target.files); e.target.value = ''; }}/><button className={`tool-btn library-chip ${activeLibrarySources.length ? 'library-chip-active' : ''}`} onClick={() => setLibraryOpen(true)} title="Choose knowledge sources"><FileText size={15}/><span>Sources{activeLibrarySources.length ? ` · ${activeLibrarySources.length}` : ''}</span></button><span className="tool-separator"/><button className="tool-btn persona-chip" onClick={() => setPersonaModalOpen(true)} title="Switch persona preset & templates"><UserRound size={14}/><span>{settings.name || 'Ari'} <span className="persona-live">·</span> persona</span></button></div><div className="send-group"><span className="send-hint">Shift + Enter for a new line</span><button className={`send-btn ${busy ? 'send-stop' : ''}`} title={busy ? 'Stop response' : 'Send message'} onClick={() => busy ? abortRef.current?.abort() : send()} disabled={!busy && !input.trim() && !files.length}>{busy ? <span className="stop-square"/> : <ArrowUp size={17}/>}</button></div></div></div><div className="composer-caption">Your conversations stay on this device. Your API key is stored locally in your browser.</div></div></div>
+            <div className="composer"><textarea ref={textareaRef} rows="1" placeholder={activeChat?.messages?.length ? `Message ${settings.name || currentPersona.name || 'Ari'}…` : 'Ask anything, or start with a file…'} value={input} onChange={e => { setInput(e.target.value); e.target.style.height = 'auto'; e.target.style.height = `${Math.min(e.target.scrollHeight, 180)}px`; }} onKeyDown={handleKeyDown}/><div className="composer-toolbar"><div className="composer-tools"><button className="tool-btn attach-btn" onClick={() => fileRef.current?.click()} title="Attach files"><Paperclip size={17}/><span>Attach</span></button><input ref={fileRef} type="file" multiple hidden onChange={e => { onFiles(e.target.files); e.target.value = ''; }}/><button className={`tool-btn library-chip ${activeLibrarySources.length ? 'library-chip-active' : ''}`} onClick={() => setLibraryOpen(true)} title="Choose knowledge sources"><FileText size={15}/><span>Sources{activeLibrarySources.length ? ` · ${activeLibrarySources.length}` : ''}</span></button><span className="tool-separator"/><button className={`tool-btn persona-chip ${currentPersona.id === EXPLICIT_PERSONA_ID || currentPersona.id === 'explicit' ? 'persona-chip-explicit' : ''}`} onClick={() => setPersonaModalOpen(true)} title="Switch persona preset & templates">{currentPersona.avatarIcon ? <currentPersona.avatarIcon size={14} className="persona-chip-icon" /> : <UserRound size={14}/>}<span>{settings.name || currentPersona.name || 'Ari'} <span className="persona-live">·</span> persona</span>{(currentPersona.isAdult || currentPersona.id === EXPLICIT_PERSONA_ID) && <span className="persona-age-pill mini">18+</span>}</button></div><div className="send-group"><span className="send-hint">Shift + Enter for a new line</span><button className={`send-btn ${busy ? 'send-stop' : ''}`} title={busy ? 'Stop response' : 'Send message'} onClick={() => busy ? abortRef.current?.abort() : send()} disabled={!busy && !input.trim() && !files.length}>{busy ? <span className="stop-square"/> : <ArrowUp size={17}/>}</button></div></div></div><div className="composer-caption">Your conversations stay on this device. Your API key is stored locally in your browser.</div></div></div>
         </div>
 
         {canvasArtifact && (
@@ -1591,14 +1695,17 @@ export default function App() {
             <div className="persona-preset-chips">
               {[...BUILTIN_PERSONAS, ...customPersonas].map(p => {
                 const isActive = activePersonaId === p.id || (!p.isCustom && p.name.toLowerCase() === (settings.name || '').toLowerCase());
+                const isExplicit = p.id === EXPLICIT_PERSONA_ID || p.id === 'explicit';
                 return (
                   <button
                     key={p.id}
                     type="button"
-                    className={`persona-preset-pill ${isActive ? 'active' : ''}`}
+                    className={`persona-preset-pill ${isActive ? 'active' : ''} ${isExplicit ? 'persona-pill-explicit' : ''}`}
                     onClick={() => selectPersona(p)}
                   >
-                    <span className="persona-preset-pill-avatar">{p.avatar}</span>
+                    <span className="persona-preset-pill-avatar">
+                      {p.avatarIcon ? <p.avatarIcon size={13} /> : p.avatar}
+                    </span>
                     <span className="persona-preset-pill-name">{p.name}</span>
                     <small>{p.badge}</small>
                   </button>
@@ -1660,6 +1767,12 @@ export default function App() {
       onSaveCustomPersona={saveCustomPersona}
       onDeleteCustomPersona={deleteCustomPersona}
       currentSettings={settings}
+    />
+    <AgeGateModal
+      isOpen={ageNoticeOpen}
+      onClose={() => { setAgeNoticeOpen(false); setPendingPersona(null); }}
+      onConfirm={handleConfirmAge}
+      targetPersonaName={pendingPersona?.name || 'Explicit'}
     />
     {toast && <div className="toast"><Check size={15}/>{toast}</div>}
       </div>
@@ -1813,20 +1926,26 @@ function PersonaModal({
           {filteredPersonas.map(persona => {
             const isActive = activePersonaId === persona.id ||
               (!persona.isCustom && persona.name.toLowerCase() === (currentSettings.name || '').toLowerCase());
+            const isExplicit = persona.id === EXPLICIT_PERSONA_ID || persona.id === 'explicit';
 
             return (
               <div
                 key={persona.id}
-                className={`persona-card ${isActive ? 'persona-card-active' : ''}`}
+                className={`persona-card ${isActive ? 'persona-card-active' : ''} ${isExplicit ? 'persona-card-explicit' : ''}`}
               >
                 <div className="persona-card-top">
                   <div className="persona-card-avatar-wrap">
-                    <span className="persona-avatar-icon">{persona.avatar}</span>
+                    {persona.avatarIcon ? (
+                      <span className="persona-avatar-icon"><persona.avatarIcon size={18} /></span>
+                    ) : (
+                      <span className="persona-avatar-icon">{persona.avatar}</span>
+                    )}
                   </div>
                   <div className="persona-card-meta">
                     <div className="persona-card-title-row">
                       <h4>{persona.name}</h4>
-                      <span className="persona-badge-tag">{persona.badge}</span>
+                      <span className={`persona-badge-tag ${isExplicit ? 'persona-18-plus-tag' : ''}`}>{persona.badge}</span>
+                      {(persona.isAdult || isExplicit) && <span className="persona-age-pill">18+</span>}
                       {isActive && <span className="persona-active-badge"><Check size={11}/> Active</span>}
                     </div>
                     <p className="persona-card-tagline">{persona.tagline}</p>
@@ -1834,7 +1953,7 @@ function PersonaModal({
                 </div>
 
                 <div className="persona-card-prompt-preview">
-                  "{persona.persona.slice(0, 130)}…"
+                  {persona.description ? persona.description : `"${persona.persona.slice(0, 130)}…"`}
                 </div>
 
                 {persona.starters?.length > 0 && (
@@ -1852,13 +1971,18 @@ function PersonaModal({
 
                 <div className="persona-card-footer">
                   <button
-                    className={`persona-apply-btn ${isActive ? 'applied' : ''}`}
+                    className={`persona-apply-btn ${isActive ? 'applied' : ''} ${isExplicit ? 'explicit-btn' : ''}`}
                     onClick={() => onSelectPersona(persona)}
                   >
                     {isActive ? (
                       <>
                         <Check size={14}/>
                         <span>Currently Active</span>
+                      </>
+                    ) : isExplicit ? (
+                      <>
+                        <Flame size={14}/>
+                        <span>Activate Explicit (18+)</span>
                       </>
                     ) : (
                       <>
@@ -1882,6 +2006,73 @@ function PersonaModal({
             );
           })}
         </div>
+      </section>
+    </div>
+  );
+}
+
+function AgeGateModal({ isOpen, onClose, onConfirm, targetPersonaName = 'Explicit' }) {
+  if (!isOpen) return null;
+
+  return (
+    <div
+      className="modal-backdrop age-gate-backdrop"
+      onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <section
+        className="age-gate-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="age-gate-title"
+      >
+        <header className="age-gate-header">
+          <div className="age-gate-icon-badge">
+            <Flame size={26} color="#fda4af" />
+          </div>
+          <div className="age-gate-kicker">ADULT CONTENT NOTICE · 18+</div>
+          <h2 id="age-gate-title">Activate {targetPersonaName} Persona?</h2>
+        </header>
+
+        <div className="age-gate-body">
+          <p className="age-gate-summary">
+            The <strong>{targetPersonaName}</strong> persona provides a raw, direct, and mature conversational style.
+            It is comfortable with profanity, dark humor, vulgar comedy, adult banter, and unfiltered discussions.
+          </p>
+
+          <div className="age-gate-rules-card">
+            <h4>What to expect</h4>
+            <ul>
+              <li><strong>Zero sugar-coating:</strong> Brutally honest critiques and sarcastic humor without corporate pleasantries.</li>
+              <li><strong>Mature language permitted:</strong> Vulgar slang, dark comedy, adult discussions, and cheeky banter.</li>
+              <li><strong>Technical excellence:</strong> Programming, analysis, and factual queries remain rigorous and accurate.</li>
+              <li><strong>Safety boundaries:</strong> Illegal harm, non-consensual exploitation, and minors are strictly prohibited by provider policies.</li>
+            </ul>
+          </div>
+
+          <p className="age-gate-disclaimer">
+            By activating this persona, you confirm that you are at least 18 years old and consent to unfiltered, mature conversational content.
+            This choice is saved locally on your device.
+          </p>
+        </div>
+
+        <footer className="age-gate-footer">
+          <button
+            type="button"
+            className="age-gate-cancel-btn"
+            onClick={onClose}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="age-gate-confirm-btn"
+            onClick={onConfirm}
+            autoFocus
+          >
+            <Flame size={14} />
+            <span>I Am 18+ — Activate Explicit</span>
+          </button>
+        </footer>
       </section>
     </div>
   );
