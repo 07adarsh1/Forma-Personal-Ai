@@ -7,7 +7,7 @@ import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 import mermaid from 'mermaid';
 import { MessageSquare, Plus, Search, Settings2, PanelLeftClose, PanelLeftOpen, Paperclip, ArrowUp, Sparkles, BriefcaseBusiness, FileText, Lightbulb, Code2, X, ChevronDown, ChevronUp, ChevronRight, ChevronLeft, MoreHorizontal, Copy, Check, Trash2, KeyRound, SlidersHorizontal, UserRound, Eye, EyeOff, Upload, SquarePen, GitBranch, RotateCcw, Menu, AlertCircle, LoaderCircle, Command, Globe2, ShieldCheck, Sun, Moon, Download, Image as ImageIcon, File, Mic, AudioLines, Archive, Pin, Maximize2, Minimize2, Play, ExternalLink, Monitor, Tablet, Smartphone, Bookmark, ArrowDown, Compass, ListOrdered, Columns2, ArrowLeft, ZoomIn, ZoomOut, Move, Terminal, Flame } from 'lucide-react';
-import { EXPLICIT_PERSONA_ID, EXPLICIT_SYSTEM_PROMPT } from '../api/personas.js';
+import { EXPLICIT_PERSONA_ID, EXPLICIT_SYSTEM_PROMPT, SERVER_PERSONAS } from '../api/personas.js';
 
 
 export const CanvasContext = createContext({
@@ -24,7 +24,7 @@ const formatSize = size => !size ? '0 B' : size < 1024 ? `${size} B` : size < 10
 
 const DEFAULT_SETTINGS = { name: 'Ari', persona: 'You are Ari, a thoughtful, sharp and encouraging personal assistant. Be warm but never overly agreeable. Give clear, useful answers. If the user shares a resume or other documents, use them as the source of truth. Be honest about what you don’t know.', temperature: 0.7, systemPrompt: '', maxTokens: 2048, unlimitedOutput: false, theme: 'dark' };
 const CHAT_KEY = 'forma.chats.v1'; const SET_KEY = 'forma.settings.v1'; const PROVIDER_KEY = 'forma.providers.v1'; const PERSONA_PRESETS_KEY = 'forma.personas.v1';
-const DEFAULT_PROVIDER = { id: 'provider-default', name: 'Qwen 3.8 Max (xkiro)', baseUrl: 'https://api.xkiro.com/v1', model: 'qwen/qwen3.8-max:free', models: [{ id: 'model-default', name: 'qwen/qwen3.8-max:free', enabled: true }], activeModelId: 'model-default', apiKey: 'sk-xt-e55f20a4f3fa8c9c4be36d39de81dd841531acbc599b1b84', extraHeaders: '', enabled: true };
+const DEFAULT_PROVIDER = { id: 'provider-default', name: 'Qwen 3.8 Max (xkiro)', baseUrl: 'https://api.xkiro.com/v1', model: 'qwen/qwen3.8-max:free', models: [{ id: 'model-default', name: 'qwen/qwen3.8-max:free', enabled: true }], activeModelId: 'model-default', apiKey: '', extraHeaders: '', enabled: true };
 const dbPromise = openDB('forma-local', 2, { upgrade(db) { if (!db.objectStoreNames.contains('chats')) db.createObjectStore('chats', { keyPath: 'id' }); if (!db.objectStoreNames.contains('library')) db.createObjectStore('library', { keyPath: 'id' }); } });
 
 export const BUILTIN_PERSONAS = [
@@ -158,14 +158,16 @@ const readProviderStore = () => {
   const normalize = p => {
     const models = p.models?.length ? p.models.map(m => ({ enabled: true, ...m })) : (p.model ? [{ id: `${p.id}-model`, name: p.model, enabled: true }] : []);
     const selected = models.find(m => m.id === p.activeModelId && m.enabled !== false) || models.find(m => m.name === p.model && m.enabled !== false) || models.find(m => m.enabled !== false);
-    const apiKey = p.apiKey || (p.baseUrl === DEFAULT_PROVIDER.baseUrl ? DEFAULT_PROVIDER.apiKey : '');
+    const isOldSharedKey = Boolean(p.apiKey && p.apiKey.startsWith('sk-xt-'));
+    const apiKey = isOldSharedKey ? '' : (p.apiKey || '');
     return { enabled: true, ...p, apiKey, models, activeModelId: selected?.id || '', model: selected?.name || '' };
   };
+  const isUsable = p => Boolean(p.baseUrl && p.model && (p.apiKey || p.id === DEFAULT_PROVIDER.id || p.baseUrl === DEFAULT_PROVIDER.baseUrl));
   if (saved?.profiles?.length) {
     let profiles = saved.profiles.map(normalize);
     const active = profiles.find(p => p.id === saved.activeId);
-    if (!active?.apiKey) {
-      const hasWorking = profiles.some(p => p.apiKey && p.baseUrl);
+    if (!isUsable(active || {})) {
+      const hasWorking = profiles.some(isUsable);
       if (!hasWorking) {
         profiles = [DEFAULT_PROVIDER, ...profiles.filter(p => p.id !== DEFAULT_PROVIDER.id)];
         return { profiles, activeId: DEFAULT_PROVIDER.id };
@@ -175,7 +177,8 @@ const readProviderStore = () => {
   }
   const legacy = load(SET_KEY, {});
   const model = legacy.model || DEFAULT_PROVIDER.model;
-  const profile = { ...DEFAULT_PROVIDER, name: legacy.providerName || providerLabel(legacy.baseUrl), baseUrl: legacy.baseUrl || DEFAULT_PROVIDER.baseUrl, model, models: [{ id: `${DEFAULT_PROVIDER.id}-model`, name: model, enabled: true }], activeModelId: `${DEFAULT_PROVIDER.id}-model`, apiKey: legacy.apiKey || DEFAULT_PROVIDER.apiKey, extraHeaders: legacy.extraHeaders || '' };
+  const legacyKey = (legacy.apiKey && legacy.apiKey.startsWith('sk-xt-')) ? '' : (legacy.apiKey || '');
+  const profile = { ...DEFAULT_PROVIDER, name: legacy.providerName || providerLabel(legacy.baseUrl), baseUrl: legacy.baseUrl || DEFAULT_PROVIDER.baseUrl, model, models: [{ id: `${DEFAULT_PROVIDER.id}-model`, name: model, enabled: true }], activeModelId: `${DEFAULT_PROVIDER.id}-model`, apiKey: legacyKey, extraHeaders: legacy.extraHeaders || '' };
   return { profiles: [profile], activeId: profile.id };
 };
 const newChat = (personaId) => ({ id: uid(), title: 'New conversation', messages: [], personaId: personaId || null, updatedAt: Date.now() });
@@ -494,8 +497,8 @@ export default function App() {
   const activeChat = chats.find(c => c.id === activeId);
   const activeLibrarySources = library.filter(source => activeChat?.librarySourceIds?.includes(source.id));
   const activeProvider = providers.find(p => p.id === activeProviderId) || providers[0] || DEFAULT_PROVIDER;
-  const editingProvider = providers.find(p => p.id === editingProviderId) || activeProvider;
-  const activeProviderConfigured = Boolean(activeProvider.enabled !== false && activeProvider.apiKey && activeProvider.baseUrl && activeProvider.model);
+  const isDefaultActive = activeProvider.id === DEFAULT_PROVIDER.id || activeProvider.baseUrl === DEFAULT_PROVIDER.baseUrl;
+  const activeProviderConfigured = Boolean(activeProvider.enabled !== false && (activeProvider.apiKey || isDefaultActive) && activeProvider.baseUrl && activeProvider.model);
   const appTheme = settings.theme === 'system' ? (prefersDark ? 'dark' : 'light') : settings.theme;
   const userMessages = activeChat?.messages?.filter(m => m.role === 'user') || [];
   const shortcutLabel = /Mac/i.test(navigator.platform || '') ? '⌘ K' : 'Ctrl K';
@@ -738,7 +741,7 @@ export default function App() {
     try {
       if (activeProvider?.enabled === false) throw new Error('Enable this provider in Model settings before using it.');
       if (!activeProvider?.baseUrl?.trim() || !activeProvider?.model?.trim()) throw new Error('Add a base URL and enabled model in Model settings for this provider.');
-      if (!activeProvider?.apiKey?.trim()) throw new Error('Add an API key in Settings → Models for this provider.');
+      const userApiKey = activeProvider?.apiKey?.trim() || '';
       const previous = historyOverride ?? chat.messages;
       const libraryInstruction = sourceAttachments.length ? `Use the selected Knowledge Library sources as context when they are relevant. Cite their filename in your answer when you draw on them, and say when the sources do not contain the answer.` : '';
       const system = [settings.persona, settings.systemPrompt, libraryInstruction].filter(Boolean).join('\n\n');
@@ -750,8 +753,15 @@ export default function App() {
       const payload = { model: activeProvider.model, messages, stream: true, temperature: Number(settings.temperature) };
       if (!settings.unlimitedOutput) payload.max_tokens = Number(settings.maxTokens);
 
-      const requestHeaders = { 'Content-Type': 'application/json', Authorization: `Bearer ${activeProvider.apiKey}`, ...extraHeaders };
-      const isExplicitActive = activePersonaId === EXPLICIT_PERSONA_ID || activePersonaId === 'explicit';
+      const requestHeaders = {
+        'Content-Type': 'application/json',
+        ...(userApiKey ? { Authorization: `Bearer ${userApiKey}` } : {}),
+        ...extraHeaders
+      };
+
+      const normPersonaId = String(activePersonaId || '').toLowerCase().trim();
+      const isServerPersona = Boolean(SERVER_PERSONAS[normPersonaId] || normPersonaId === 'explicit' || normPersonaId === EXPLICIT_PERSONA_ID);
+
       const proxyPayload = {
         endpoint,
         headers: requestHeaders,
@@ -761,54 +771,45 @@ export default function App() {
       };
       const proxyHeaders = {
         'Content-Type': 'application/json',
-        'x-persona-id': activePersonaId || ''
+        'x-persona-id': activePersonaId || '',
+        ...(userApiKey ? { Authorization: `Bearer ${userApiKey}` } : {})
       };
 
       let res;
-      if (isExplicitActive) {
-        // Enforce server-side prompt injection and policy compliance through backend proxy
-        try {
-          res = await fetch('/api/proxy', {
-            method: 'POST',
-            signal: controller.signal,
-            headers: proxyHeaders,
-            body: JSON.stringify(proxyPayload)
-          });
-          if (res.status === 404 || res.status === 405) {
-            // Standalone client fallback if backend proxy route is unavailable
-            res = await fetch(endpoint, { method: 'POST', signal: controller.signal, headers: requestHeaders, body: JSON.stringify(payload) });
-          }
-        } catch (proxyErr) {
-          if (proxyErr.name === 'AbortError') throw proxyErr;
-          res = await fetch(endpoint, { method: 'POST', signal: controller.signal, headers: requestHeaders, body: JSON.stringify(payload) });
+      try {
+        res = await fetch('/api/proxy', {
+          method: 'POST',
+          signal: controller.signal,
+          headers: proxyHeaders,
+          body: JSON.stringify(proxyPayload)
+        });
+      } catch (proxyErr) {
+        if (proxyErr.name === 'AbortError') throw proxyErr;
+        // Proxy failures must NEVER bypass server-side security!
+        if (isServerPersona || !userApiKey) {
+          throw new Error(`Security proxy unavailable: ${proxyErr.message || 'Network error'}. Server-side security cannot be bypassed.`);
         }
-      } else {
-        try {
-          res = await fetch(endpoint, { method: 'POST', signal: controller.signal, headers: requestHeaders, body: JSON.stringify(payload) });
-        } catch (directErr) {
-          if (directErr.name === 'AbortError') throw directErr;
-          try {
-            res = await fetch('/api/proxy', {
-              method: 'POST',
-              signal: controller.signal,
-              headers: proxyHeaders,
-              body: JSON.stringify(proxyPayload)
-            });
-            if (res.status === 404 || res.status === 405) {
-              throw new Error(`Direct connection was blocked by CORS (${directErr.message}), and /api/proxy is not available on this server.`);
-            }
-          } catch (proxyErr) {
-            if (proxyErr.name === 'AbortError') throw proxyErr;
-            throw new Error(
-              `Connection error: Unable to reach ${activeProvider.name || activeProvider.baseUrl}. ` +
-              `This happens when the API provider does not allow browser requests from deployed domains (CORS error). ` +
-              `Ensure your serverless proxy (/api/proxy) is deployed, or use a CORS-enabled provider like OpenRouter or Gemini.`
-            );
-          }
-        }
+        // Fallback ONLY for custom personas with their own BYOK key on standalone static hosts
+        res = await fetch(endpoint, { method: 'POST', signal: controller.signal, headers: requestHeaders, body: JSON.stringify(payload) });
       }
 
-      if (!res.ok) { const body = await res.text(); let detail = body; try { detail = JSON.parse(body).error?.message || body; } catch {} throw new Error(`Provider error (${res.status}): ${detail.slice(0, 360)}`); }
+      if (res.status === 404 || res.status === 405) {
+        if (isServerPersona || !userApiKey) {
+          throw new Error(`Security proxy endpoint /api/proxy returned ${res.status}. Server-side security and default credentials cannot be bypassed.`);
+        }
+        // Fallback ONLY for custom personas with their own BYOK key
+        res = await fetch(endpoint, { method: 'POST', signal: controller.signal, headers: requestHeaders, body: JSON.stringify(payload) });
+      }
+
+      if (!res.ok) {
+        const body = await res.text();
+        let detail = body;
+        try {
+          const parsed = JSON.parse(body);
+          detail = parsed.error?.message || parsed.error || body;
+        } catch {}
+        throw new Error(`Provider error (${res.status}): ${typeof detail === 'string' ? detail.slice(0, 360) : JSON.stringify(detail)}`);
+      }
       if (!res.body) throw new Error('This provider did not return a streaming response.');
       const reader = res.body.getReader(); const decoder = new TextDecoder(); let buffer = ''; let answer = '';
       while (true) {
@@ -1677,7 +1678,7 @@ export default function App() {
     {libraryOpen && <div className="modal-backdrop library-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) setLibraryOpen(false); }}><section className="library-modal" role="dialog" aria-modal="true" aria-labelledby="library-title"><header className="library-head"><div><div className="modal-kicker">LOCAL KNOWLEDGE</div><h2 id="library-title">Knowledge Library</h2><p>Upload once, then choose the sources this chat can use.</p></div><button className="icon-btn" aria-label="Close Knowledge Library" onClick={() => setLibraryOpen(false)}><X size={19}/></button></header><div className="library-content"><div className="library-upload-card"><div className="library-upload-icon"><FileText size={18}/></div><div><b>Add reference files</b><small>PDF, DOCX, text, code, CSV, and images stay in this browser.</small></div><button className="library-upload-button" onClick={() => libraryFileRef.current?.click()}><Upload size={15}/>Add files</button><input ref={libraryFileRef} type="file" multiple hidden onChange={e => { onLibraryFiles(e.target.files); e.target.value = ''; }}/></div><div className="library-list-heading"><span>Your sources</span><small>{library.length} saved</small></div>{library.length ? <div className="library-source-list">{library.map(source => { const selected = activeChat?.librarySourceIds?.includes(source.id); const Icon = fileIcon(source.type); return <div className={`library-source-row ${selected ? 'library-source-selected' : ''}`} key={source.id}><button className="library-source-select" onClick={() => toggleLibrarySource(source.id)} aria-pressed={selected}><span className="library-source-check">{selected && <Check size={12}/>}</span><span className="library-source-icon"><Icon size={16}/></span><span className="library-source-copy"><b title={source.name}>{source.name}</b><small>{formatSize(source.size)} · {source.content ? 'Text ready' : source.image ? 'Visual source' : 'File attached'}</small></span></button><button className="library-source-remove" title={`Remove ${source.name}`} aria-label={`Remove ${source.name}`} onClick={() => removeLibrarySource(source.id)}><Trash2 size={15}/></button></div>; })}</div> : <div className="library-empty"><FileText size={20}/><b>Your library is empty</b><span>Add a resume, project brief, or reference document to reuse it across chats.</span></div>}<p className="library-note"><ShieldCheck size={14}/> Selected sources are sent with each new request in this chat. Your library stays on this device.</p></div><footer className="library-footer"><span>{activeLibrarySources.length ? `${activeLibrarySources.length} source${activeLibrarySources.length === 1 ? '' : 's'} active for this chat` : 'No sources selected for this chat'}</span><button className="done-btn" onClick={() => setLibraryOpen(false)}>Done</button></footer></section></div>}
     {settingsOpen && <div className="modal-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) setSettingsOpen(false); }}><div className={`settings-modal ${settingsTab === 'connection' ? 'model-settings-modal' : ''}`}><div className="modal-head"><div><div className="modal-kicker">{settingsTab === 'connection' ? 'MODEL SETTINGS' : 'PREFERENCES'}</div><h2>{settingsTab === 'connection' ? 'Model settings' : 'Settings'}</h2></div><button className="icon-btn" onClick={() => setSettingsOpen(false)}><X size={19}/></button></div><div className="settings-layout"><nav className="settings-nav"><button className={settingsTab==='connection'?'nav-active':''} onClick={() => setSettingsTab('connection')}><KeyRound size={16}/> Models</button><button className={settingsTab==='persona'?'nav-active':''} onClick={() => setSettingsTab('persona')}><UserRound size={16}/> Persona</button><button className={settingsTab==='preferences'?'nav-active':''} onClick={() => setSettingsTab('preferences')}><SlidersHorizontal size={16}/> Preferences</button></nav><div className="settings-content">
           {settingsTab==='connection' && <div className="provider-manager-layout">
-            <aside className="provider-list-panel"><div className="provider-list-caption">Providers</div>{providers.map(p => <button key={p.id} className={`provider-list-item ${p.id === editingProviderId ? 'provider-list-selected' : ''} ${p.enabled === false ? 'provider-list-disabled' : ''}`} onClick={() => { setEditingProviderId(p.id); setModelEntryOpen(false); setEditingModelId(''); }}><span className="provider-list-icon"><Globe2 size={15}/></span><span className="provider-list-copy"><b>{p.name || 'Unnamed provider'}</b><small>{p.id === activeProviderId ? 'Active · ' : ''}{p.model || p.baseUrl || 'Needs setup'}</small></span><span className={`provider-list-dot ${p.enabled === false ? 'dot-disabled' : p.apiKey && p.baseUrl && p.model ? 'dot-ready' : 'dot-incomplete'}`}/></button>)}<button className="provider-add-button" onClick={addProvider}><Plus size={16}/> Add provider</button></aside>
+            <aside className="provider-list-panel"><div className="provider-list-caption">Providers</div>{providers.map(p => { const isReady = p.enabled !== false && (p.apiKey || p.id === DEFAULT_PROVIDER.id || p.baseUrl === DEFAULT_PROVIDER.baseUrl) && p.baseUrl && p.model; return <button key={p.id} className={`provider-list-item ${p.id === editingProviderId ? 'provider-list-selected' : ''} ${p.enabled === false ? 'provider-list-disabled' : ''}`} onClick={() => { setEditingProviderId(p.id); setModelEntryOpen(false); setEditingModelId(''); }}><span className="provider-list-icon"><Globe2 size={15}/></span><span className="provider-list-copy"><b>{p.name || 'Unnamed provider'}</b><small>{p.id === activeProviderId ? 'Active · ' : ''}{p.model || p.baseUrl || 'Needs setup'}</small></span><span className={`provider-list-dot ${p.enabled === false ? 'dot-disabled' : isReady ? 'dot-ready' : 'dot-incomplete'}`}/></button>; })}<button className="provider-add-button" onClick={addProvider}><Plus size={16}/> Add provider</button></aside>
             <section className="provider-detail-panel"><div className="provider-detail-scroll"><div className="provider-detail-header"><div className="provider-detail-title"><span className="provider-detail-icon"><Globe2 size={17}/></span><input className="provider-title-input" aria-label="Provider name" maxLength="40" value={editingProvider.name || ''} onChange={e => patchProvider({ name:e.target.value })} placeholder="Provider name"/></div><div className="provider-detail-actions"><button type="button" className={`provider-activate-button ${editingProvider.id === activeProviderId ? 'provider-activate-current' : ''}`} onClick={() => { setActiveProviderId(editingProviderId); setToast(`Switched active provider to ${editingProvider.name || 'selected provider'}`); }} title={editingProvider.id === activeProviderId ? 'Currently active provider' : 'Make this the active provider'}>{editingProvider.id === activeProviderId ? 'Active' : 'Set active'}</button><button className={`provider-state-toggle ${editingProvider.enabled === false ? '' : 'toggle-on'}`} role="switch" aria-checked={editingProvider.enabled !== false} aria-label="Enable provider" onClick={() => toggleProvider(editingProviderId)}><span/></button>{providers.length > 1 && <button className="icon-btn provider-delete-button" title="Remove provider" onClick={removeEditingProvider}><Trash2 size={16}/></button>}</div></div>
               <label className="form-label">Provider preset</label><select className="form-input" value={editingProvider.baseUrl === 'https://api.openai.com/v1' ? 'openai' : editingProvider.baseUrl === 'https://openrouter.ai/api/v1' ? 'openrouter' : editingProvider.baseUrl === 'https://generativelanguage.googleapis.com/v1beta/openai' ? 'google' : 'custom'} onChange={e => applyProviderPreset(e.target.value)}><option value="custom">Custom OpenAI-compatible</option><option value="openai">OpenAI</option><option value="openrouter">OpenRouter</option><option value="google">Google Gemini</option></select>
               <label className="form-label">Base URL</label><input className="form-input" placeholder="https://api.example.com/v1" value={editingProvider.baseUrl || ''} onChange={e => patchProvider({ baseUrl:e.target.value })}/>

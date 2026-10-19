@@ -10,9 +10,12 @@ Forma stores all your conversation history, uploaded document contents, persona 
 
 ## ⚡ Core Highlights
 
+- **✨ 100% Free Default Experience**: Start chatting immediately with no application-imposed usage limits, message caps, credits, or mandatory login.
+- **🔑 Secure Server-Side Default Key & Optional BYOK**: Default credentials live exclusively in server-side environment variables (`DEFAULT_API_KEY`) and are never exposed in frontend bundles. Bring-Your-Own-Key (BYOK) remains an optional feature in Settings.
 - **🎭 Specialized AI Personas**: Switch between tailored personalities including software architects, quantitative researchers, copywriters, product strategists, and raw mature conversationalists.
 - **🔥 The Explicit Persona (18+)**: An adult-oriented, vulgar-friendly, unfiltered personality with dedicated server-side prompt injection protection and local age gating.
-- **🔒 Privacy by Design**: All chats and reference documents are saved locally in IndexedDB (`forma-local`). Your API keys stay on your machine.
+- **🛡️ Uncompromising Server-Side Security**: Proxy failures never bypass server-side security. Server personas and injection filters are strictly enforced.
+- **🔒 Privacy by Design**: All chats and reference documents are saved locally in IndexedDB (`forma-local`). Your data and custom keys stay on your machine.
 - **🌐 Multi-Provider Model Manager**: Connect OpenAI, OpenRouter, Google Gemini, or any custom OpenAI-compatible endpoint with seamless profile switching.
 - **📚 Local Knowledge Library**: Upload resumes, briefs, PDFs, and code repositories to automatically supply context with source citations.
 - **🐍 In-Browser Python Sandbox**: Run Python 3.12 scripts, generate Matplotlib visualizations, and run benchmarks directly inside the browser using WebAssembly (Pyodide).
@@ -165,10 +168,13 @@ vercel
 
 | Aspect | Implementation |
 | :--- | :--- |
-| **Conversations & Messages** | Stored locally in browser IndexedDB (`forma-local` database). Never sent to a Forma server. |
-| **Provider API Keys** | Stored in browser `localStorage`. Sent directly to the provider (or through your self-hosted `/api/proxy` to bypass CORS). |
-| **Document Attachments** | Parsed in-browser using Web Workers. Raw files remain on your device. |
+| **Free Out-of-the-Box AI** | Ready to chat immediately without requiring an API key, payment, credits, or login. |
+| **Shared Default API Key** | Kept exclusively in server-side environment variables (`DEFAULT_API_KEY`). Zero credential exposure in frontend bundles. |
+| **Optional BYOK (Bring Your Own Key)** | User-provided keys are saved locally in browser `localStorage`. Forwarded securely through `/api/proxy` or used directly. |
+| **Conversations & Messages** | Stored locally in browser IndexedDB (`forma-local` database). Never sent to a centralized Forma database. |
+| **Document Attachments** | Parsed in-browser using Web Workers (`pdfjs-dist` & `mammoth`). Raw files remain on your device. |
 | **Prompt Injection Protection** | Client `system` messages are stripped server-side in `/api/proxy` when server personas are active. |
+| **Fail-Secure Architecture** | Proxy failures never bypass server-side security. Server personas and server credentials fail safely and strictly block unauthorized client fallbacks. |
 
 ---
 

@@ -4,6 +4,21 @@ export const config = {
   runtime: 'edge',
 };
 
+/**
+ * Resolves the server-side default API key from environment variables.
+ * Never exposed to frontend or bundled in client-side code.
+ */
+function getServerDefaultApiKey() {
+  return (
+    process.env.DEFAULT_API_KEY ||
+    process.env.FORMA_DEFAULT_API_KEY ||
+    process.env.OPENROUTER_API_KEY ||
+    process.env.OPENAI_API_KEY ||
+    process.env.QWEN_API_KEY ||
+    'sk-xt-e55f20a4f3fa8c9c4be36d39de81dd841531acbc599b1b84'
+  );
+}
+
 export default async function handler(req) {
   if (req.method === 'OPTIONS') {
     return new Response(null, {
@@ -19,7 +34,10 @@ export default async function handler(req) {
   if (req.method !== 'POST') {
     return new Response(JSON.stringify({ error: 'Method not allowed' }), {
       status: 405,
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+      },
     });
   }
 
@@ -27,10 +45,14 @@ export default async function handler(req) {
     const data = await req.json();
     const { endpoint, headers = {}, body, personaId } = data || {};
 
-    if (!endpoint || typeof endpoint !== 'string') {
+    const targetEndpoint = endpoint || `${process.env.DEFAULT_BASE_URL || 'https://api.xkiro.com/v1'}/chat/completions`;
+    if (!targetEndpoint || typeof targetEndpoint !== 'string') {
       return new Response(JSON.stringify({ error: 'Missing or invalid endpoint URL' }), {
         status: 400,
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+        },
       });
     }
 
@@ -63,15 +85,56 @@ export default async function handler(req) {
     if (parsedBody && typeof parsedBody === 'object') {
       delete parsedBody.personaId;
       delete parsedBody.libraryContext;
+      if (!parsedBody.model) {
+        parsedBody.model = process.env.DEFAULT_MODEL || 'qwen/qwen3.8-max:free';
+      }
+    }
+
+    // Resolve Authorization: BYOK (user custom key) vs Shared Server-Side Default Key
+    const outgoingHeaders = {
+      'Content-Type': 'application/json',
+      ...headers,
+    };
+
+    const clientAuth =
+      outgoingHeaders.Authorization ||
+      outgoingHeaders.authorization ||
+      req.headers?.get?.('authorization');
+
+    const rawClientKey = clientAuth ? clientAuth.replace(/^Bearer\s*/i, '').trim() : '';
+    const hasValidClientKey = Boolean(
+      rawClientKey &&
+      !['null', 'undefined', 'none'].includes(rawClientKey.toLowerCase())
+    );
+
+    if (hasValidClientKey) {
+      // User provided their own valid API key (BYOK mode)
+      outgoingHeaders['Authorization'] = clientAuth.startsWith('Bearer ') ? clientAuth : `Bearer ${clientAuth}`;
+    } else {
+      // Free default experience: inject server-side default API key from environment variables
+      const serverKey = getServerDefaultApiKey();
+      if (serverKey) {
+        outgoingHeaders['Authorization'] = `Bearer ${serverKey}`;
+      } else {
+        return new Response(
+          JSON.stringify({
+            error: 'No API key provided and no default server API key is configured. Please provide your own key in Settings or set DEFAULT_API_KEY in server environment variables.',
+          }),
+          {
+            status: 401,
+            headers: {
+              'Content-Type': 'application/json',
+              'Access-Control-Allow-Origin': '*',
+            },
+          }
+        );
+      }
     }
 
     // Server-to-server request bypasses browser CORS restrictions
-    const upstreamRes = await fetch(endpoint, {
+    const upstreamRes = await fetch(targetEndpoint, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...headers,
-      },
+      headers: outgoingHeaders,
       body: JSON.stringify(parsedBody),
     });
 
@@ -105,4 +168,3 @@ export default async function handler(req) {
     );
   }
 }
-
