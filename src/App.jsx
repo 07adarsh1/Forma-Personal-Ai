@@ -1,12 +1,12 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { openDB } from 'idb';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { MessageSquare, Plus, Search, Settings2, PanelLeftClose, PanelLeftOpen, Paperclip, ArrowUp, Sparkles, BriefcaseBusiness, FileText, Lightbulb, Code2, X, ChevronDown, MoreHorizontal, Copy, Check, Trash2, KeyRound, SlidersHorizontal, UserRound, Eye, EyeOff, Upload, SquarePen, GitBranch, RotateCcw, Menu, AlertCircle, LoaderCircle, Command, Globe2, ShieldCheck, Sun, Moon, Download, Image as ImageIcon, File, Mic, AudioLines, Archive, Pin, Maximize2, Play, ExternalLink, Monitor, Tablet, Smartphone } from 'lucide-react';
+import { MessageSquare, Plus, Search, Settings2, PanelLeftClose, PanelLeftOpen, Paperclip, ArrowUp, Sparkles, BriefcaseBusiness, FileText, Lightbulb, Code2, X, ChevronDown, ChevronUp, ChevronRight, MoreHorizontal, Copy, Check, Trash2, KeyRound, SlidersHorizontal, UserRound, Eye, EyeOff, Upload, SquarePen, GitBranch, RotateCcw, Menu, AlertCircle, LoaderCircle, Command, Globe2, ShieldCheck, Sun, Moon, Download, Image as ImageIcon, File, Mic, AudioLines, Archive, Pin, Maximize2, Play, ExternalLink, Monitor, Tablet, Smartphone, Bookmark, ArrowDown, Compass, ListOrdered } from 'lucide-react';
 
 const DEFAULT_SETTINGS = { name: 'Ari', persona: 'You are Ari, a thoughtful, sharp and encouraging personal assistant. Be warm but never overly agreeable. Give clear, useful answers. If the user shares a resume or other documents, use them as the source of truth. Be honest about what you don’t know.', temperature: 0.7, systemPrompt: '', maxTokens: 2048, unlimitedOutput: false, theme: 'dark' };
 const CHAT_KEY = 'forma.chats.v1'; const SET_KEY = 'forma.settings.v1'; const PROVIDER_KEY = 'forma.providers.v1';
-const DEFAULT_PROVIDER = { id: 'provider-default', name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini', models: [{ id: 'model-default', name: 'gpt-4o-mini', enabled: true }], activeModelId: 'model-default', apiKey: '', extraHeaders: '', enabled: true };
+const DEFAULT_PROVIDER = { id: 'provider-default', name: 'Qwen 3.8 Max (xkiro)', baseUrl: 'https://api.xkiro.com/v1', model: 'qwen/qwen3.8-max:free', models: [{ id: 'model-default', name: 'qwen/qwen3.8-max:free', enabled: true }], activeModelId: 'model-default', apiKey: 'sk-xt-e55f20a4f3fa8c9c4be36d39de81dd841531acbc599b1b84', extraHeaders: '', enabled: true };
 const dbPromise = openDB('forma-local', 2, { upgrade(db) { if (!db.objectStoreNames.contains('chats')) db.createObjectStore('chats', { keyPath: 'id' }); if (!db.objectStoreNames.contains('library')) db.createObjectStore('library', { keyPath: 'id' }); } });
 const starterPrompts = [
   { icon: BriefcaseBusiness, title: 'Explore your experience', text: 'What would you like to know about my background?' },
@@ -14,6 +14,7 @@ const starterPrompts = [
   { icon: Lightbulb, title: 'Think something through', text: 'Help me think through a decision I’m making.' },
   { icon: Code2, title: 'Build something together', text: 'What can you help me create today?' },
 ];
+const formatMessageTime = value => value ? new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(new Date(value)) : '';
 const uid = () => crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 const copyText = async text => {
   try {
@@ -30,22 +31,35 @@ const copyText = async text => {
   textarea.select();
   const copied = document.execCommand('copy');
   textarea.remove();
+  window.getSelection?.()?.removeAllRanges?.();
   if (!copied) throw new Error('Clipboard access was unavailable');
 };
 const load = (key, fallback) => { try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch { return fallback; } };
 const readPreferences = () => { const saved = load(SET_KEY, {}); const { baseUrl, model, apiKey, extraHeaders, ...preferences } = saved; return { ...DEFAULT_SETTINGS, ...preferences }; };
-const providerLabel = url => url?.includes('openrouter.ai') ? 'OpenRouter' : url?.includes('generativelanguage.googleapis.com') ? 'Gemini' : url?.includes('api.openai.com') ? 'OpenAI' : 'My provider';
+const providerLabel = url => url?.includes('xkiro.com') ? 'Qwen (xkiro)' : url?.includes('openrouter.ai') ? 'OpenRouter' : url?.includes('generativelanguage.googleapis.com') ? 'Gemini' : url?.includes('api.openai.com') ? 'OpenAI' : 'My provider';
 const readProviderStore = () => {
   const saved = load(PROVIDER_KEY, null);
   const normalize = p => {
     const models = p.models?.length ? p.models.map(m => ({ enabled: true, ...m })) : (p.model ? [{ id: `${p.id}-model`, name: p.model, enabled: true }] : []);
     const selected = models.find(m => m.id === p.activeModelId && m.enabled !== false) || models.find(m => m.name === p.model && m.enabled !== false) || models.find(m => m.enabled !== false);
-    return { enabled: true, ...p, models, activeModelId: selected?.id || '', model: selected?.name || '' };
+    const apiKey = p.apiKey || (p.baseUrl === DEFAULT_PROVIDER.baseUrl ? DEFAULT_PROVIDER.apiKey : '');
+    return { enabled: true, ...p, apiKey, models, activeModelId: selected?.id || '', model: selected?.name || '' };
   };
-  if (saved?.profiles?.length) return { ...saved, profiles: saved.profiles.map(normalize) };
+  if (saved?.profiles?.length) {
+    let profiles = saved.profiles.map(normalize);
+    const active = profiles.find(p => p.id === saved.activeId);
+    if (!active?.apiKey) {
+      const hasWorking = profiles.some(p => p.apiKey && p.baseUrl);
+      if (!hasWorking) {
+        profiles = [DEFAULT_PROVIDER, ...profiles.filter(p => p.id !== DEFAULT_PROVIDER.id)];
+        return { profiles, activeId: DEFAULT_PROVIDER.id };
+      }
+    }
+    return { ...saved, profiles };
+  }
   const legacy = load(SET_KEY, {});
   const model = legacy.model || DEFAULT_PROVIDER.model;
-  const profile = { ...DEFAULT_PROVIDER, name: legacy.providerName || providerLabel(legacy.baseUrl), baseUrl: legacy.baseUrl || DEFAULT_PROVIDER.baseUrl, model, models: [{ id: `${DEFAULT_PROVIDER.id}-model`, name: model, enabled: true }], activeModelId: `${DEFAULT_PROVIDER.id}-model`, apiKey: legacy.apiKey || '', extraHeaders: legacy.extraHeaders || '' };
+  const profile = { ...DEFAULT_PROVIDER, name: legacy.providerName || providerLabel(legacy.baseUrl), baseUrl: legacy.baseUrl || DEFAULT_PROVIDER.baseUrl, model, models: [{ id: `${DEFAULT_PROVIDER.id}-model`, name: model, enabled: true }], activeModelId: `${DEFAULT_PROVIDER.id}-model`, apiKey: legacy.apiKey || DEFAULT_PROVIDER.apiKey, extraHeaders: legacy.extraHeaders || '' };
   return { profiles: [profile], activeId: profile.id };
 };
 const newChat = () => ({ id: uid(), title: 'New conversation', messages: [], updatedAt: Date.now() });
@@ -66,8 +80,15 @@ export default function App() {
   const [query, setQuery] = useState(''); const [toast, setToast] = useState(''); const [menuOpen, setMenuOpen] = useState(false); const [keyVisible, setKeyVisible] = useState(false);
   const [moreMenu, setMoreMenu] = useState(false); const [mobileSidebar, setMobileSidebar] = useState(false);
   const [activeMarkerId, setActiveMarkerId] = useState(null);
+  const [hoveredMarkerId, setHoveredMarkerId] = useState(null);
+  const [showScrollBottom, setShowScrollBottom] = useState(false);
+  const [outlineOpen, setOutlineOpen] = useState(false);
+  const [outlineFilter, setOutlineFilter] = useState('all');
+  const [inChatSearchOpen, setInChatSearchOpen] = useState(false);
+  const [inChatSearchQuery, setInChatSearchQuery] = useState('');
+  const [inChatSearchIndex, setInChatSearchIndex] = useState(0);
   const [prefersDark, setPrefersDark] = useState(() => window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? true);
-  const scrollRef = useRef(null); const textareaRef = useRef(null); const fileRef = useRef(null); const libraryFileRef = useRef(null); const searchRef = useRef(null); const abortRef = useRef(null);
+  const scrollRef = useRef(null); const textareaRef = useRef(null); const fileRef = useRef(null); const libraryFileRef = useRef(null); const searchRef = useRef(null); const abortRef = useRef(null); const inChatSearchInputRef = useRef(null);
   const activeChat = chats.find(c => c.id === activeId);
   const activeLibrarySources = library.filter(source => activeChat?.librarySourceIds?.includes(source.id));
   const activeProvider = providers.find(p => p.id === activeProviderId) || providers[0] || DEFAULT_PROVIDER;
@@ -77,16 +98,59 @@ export default function App() {
   const userMessages = activeChat?.messages?.filter(m => m.role === 'user') || [];
   const shortcutLabel = /Mac/i.test(navigator.platform || '') ? '⌘ K' : 'Ctrl K';
 
+  const matchingMessages = useMemo(() => {
+    if (!inChatSearchQuery.trim() || !activeChat?.messages?.length) return [];
+    const q = inChatSearchQuery.trim().toLowerCase();
+    return activeChat.messages.filter(m => (m.content || '').toLowerCase().includes(q) || (m.attachments || []).some(a => (a.name || '').toLowerCase().includes(q)));
+  }, [inChatSearchQuery, activeChat?.messages]);
+
+  const jumpToSearchMatch = (direction) => {
+    if (!matchingMessages.length) return;
+    let nextIndex = inChatSearchIndex + direction;
+    if (nextIndex >= matchingMessages.length) nextIndex = 0;
+    if (nextIndex < 0) nextIndex = matchingMessages.length - 1;
+    setInChatSearchIndex(nextIndex);
+    jumpToMessage(matchingMessages[nextIndex].id);
+  };
+
   useEffect(() => { (async () => { try { const db = await dbPromise; let saved = await db.getAll('chats'); if (!saved.length) { const legacy = load(CHAT_KEY, []); if (legacy.length) { const tx = db.transaction('chats', 'readwrite'); await Promise.all([...legacy.map(c => tx.store.put(c)), tx.done]); saved = legacy; } } saved.sort((a,b) => (b.updatedAt || 0) - (a.updatedAt || 0)); setChats(saved); setActiveId(saved.find(c => !c.archived)?.id || null); setLibrary((await db.getAll('library')).sort((a,b) => (b.createdAt || 0) - (a.createdAt || 0))); } catch (e) { console.error('Could not load local chats', e); } setChatsLoaded(true); setLibraryLoaded(true); })(); }, []);
   useEffect(() => { if (!chatsLoaded) return; const timer = window.setTimeout(async () => { try { const db = await dbPromise; const tx = db.transaction('chats', 'readwrite'); await tx.store.clear(); await Promise.all([...chats.map(c => tx.store.put(c)), tx.done]); } catch (e) { console.error('Could not save local chats', e); setToast('Could not save chat. Your browser storage may be full.'); } }, busy ? 350 : 0); return () => window.clearTimeout(timer); }, [chats, chatsLoaded, busy]);
   useEffect(() => { if (!libraryLoaded) return; const timer = window.setTimeout(async () => { try { const db = await dbPromise; const tx = db.transaction('library', 'readwrite'); await tx.store.clear(); await Promise.all([...library.map(source => tx.store.put(source)), tx.done]); } catch (e) { console.error('Could not save library', e); setToast('Could not save knowledge sources. Your browser storage may be full.'); } }, 0); return () => window.clearTimeout(timer); }, [library, libraryLoaded]);
   useEffect(() => localStorage.setItem(SET_KEY, JSON.stringify(settings)), [settings]);
   useEffect(() => localStorage.setItem(PROVIDER_KEY, JSON.stringify({ profiles: providers, activeId: activeProviderId })), [providers, activeProviderId]);
-  useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [activeChat?.messages, busy]);
+  useEffect(() => { if (scrollRef.current && !showScrollBottom) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [activeChat?.messages, busy]);
   useEffect(() => { setActiveMarkerId(userMessages.at(-1)?.id || null); }, [activeId, userMessages.length]);
   useEffect(() => { const media = window.matchMedia?.('(prefers-color-scheme: dark)'); if (!media) return; const update = e => setPrefersDark(e.matches); media.addEventListener?.('change', update); return () => media.removeEventListener?.('change', update); }, []);
   useEffect(() => { if (toast) { const t = setTimeout(() => setToast(''), 2600); return () => clearTimeout(t); } }, [toast]);
-  useEffect(() => { const onShortcut = e => { const key = e.key.toLowerCase(); if ((e.metaKey || e.ctrlKey) && key === 'k') { e.preventDefault(); makeChat(); } else if (key === '/' && !e.metaKey && !e.ctrlKey && !e.altKey && !['INPUT','TEXTAREA'].includes(document.activeElement?.tagName)) { e.preventDefault(); searchRef.current?.focus(); } else if (key === 'escape') { setSettingsOpen(false); setLibraryOpen(false); setMobileSidebar(false); setChatMenuId(null); setDeleteChatId(null); if (renamingChatId) setRenamingChatId(null); } }; window.addEventListener('keydown', onShortcut); return () => window.removeEventListener('keydown', onShortcut); }, [renamingChatId]);
+  useEffect(() => {
+    const onShortcut = e => {
+      const key = e.key.toLowerCase();
+      if ((e.metaKey || e.ctrlKey) && key === 'k') {
+        e.preventDefault();
+        makeChat();
+      } else if ((e.metaKey || e.ctrlKey) && key === 'f') {
+        e.preventDefault();
+        setInChatSearchOpen(v => {
+          if (!v) setTimeout(() => inChatSearchInputRef.current?.focus(), 50);
+          return !v;
+        });
+      } else if (key === '/' && !e.metaKey && !e.ctrlKey && !e.altKey && !['INPUT','TEXTAREA'].includes(document.activeElement?.tagName)) {
+        e.preventDefault();
+        searchRef.current?.focus();
+      } else if (key === 'escape') {
+        setSettingsOpen(false);
+        setLibraryOpen(false);
+        setMobileSidebar(false);
+        setChatMenuId(null);
+        setDeleteChatId(null);
+        setInChatSearchOpen(false);
+        setOutlineOpen(false);
+        if (renamingChatId) setRenamingChatId(null);
+      }
+    };
+    window.addEventListener('keydown', onShortcut);
+    return () => window.removeEventListener('keydown', onShortcut);
+  }, [renamingChatId]);
   useEffect(() => { if (!chatMenuId) return; const closeMenu = e => { if (!e.target.closest('.chat-row-menu-wrap')) setChatMenuId(null); }; document.addEventListener('pointerdown', closeMenu); return () => document.removeEventListener('pointerdown', closeMenu); }, [chatMenuId]);
   const patchSettings = (patch) => setSettings(s => ({ ...s, ...patch }));
   const patchProvider = (patch) => setProviders(list => list.map(p => p.id === editingProviderId ? { ...p, ...patch } : p));
@@ -101,8 +165,44 @@ export default function App() {
   const applyProviderPreset = (key) => { const presets = { openai: { name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini' }, openrouter: { name: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', model: 'openai/gpt-4o-mini' }, google: { name: 'Gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', model: 'gemini-2.0-flash' } }; const preset = presets[key]; if (!preset) return; const models = editingProvider.models || []; const existing = models.find(m => m.name === preset.model); const model = existing ? { ...existing, enabled: true } : { id: uid(), name: preset.model, enabled: true }; const nextModels = existing ? models.map(m => m.id === existing.id ? model : m) : [...models, model]; setProviders(list => list.map(p => p.id === editingProviderId ? { ...p, name: preset.name, baseUrl: preset.baseUrl, model: preset.model, models: nextModels, activeModelId: model.id } : p)); };
   const makeChat = () => { const c = newChat(); setChats(prev => [c, ...prev]); setActiveId(c.id); setShowArchived(false); setInput(''); setFiles([]); setMobileSidebar(false); textareaRef.current?.focus(); };
   const removeChat = (id, e) => { e?.stopPropagation(); setChats(prev => prev.filter(c => c.id !== id)); if (activeId === id) setActiveId(chats.find(c => c.id !== id && !c.archived)?.id || null); setChatMenuId(null); setDeleteChatId(null); };
-  const jumpToMessage = id => { setActiveMarkerId(id); document.getElementById(`message-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }); };
-  const syncActiveMarker = () => { const pane = scrollRef.current; if (!pane || !userMessages.length) return; const threshold = pane.getBoundingClientRect().top + pane.clientHeight * 0.34; let current = userMessages[0]; for (const message of userMessages) { const node = document.getElementById(`message-${message.id}`); if (node && node.getBoundingClientRect().top <= threshold) current = message; } setActiveMarkerId(current.id); };
+  const jumpToMessage = id => {
+    setActiveMarkerId(id);
+    const node = document.getElementById(`message-${id}`);
+    if (node) {
+      node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      node.classList.remove('message-jump-highlight');
+      void node.offsetWidth;
+      node.classList.add('message-jump-highlight');
+      setTimeout(() => node.classList.remove('message-jump-highlight'), 2200);
+    }
+  };
+  const syncActiveMarker = () => {
+    const pane = scrollRef.current;
+    if (!pane) return;
+    const distFromBottom = pane.scrollHeight - pane.scrollTop - pane.clientHeight;
+    setShowScrollBottom(distFromBottom > 180);
+    if (!userMessages.length) return;
+    const threshold = pane.getBoundingClientRect().top + pane.clientHeight * 0.34;
+    let current = userMessages[0];
+    for (const message of userMessages) {
+      const node = document.getElementById(`message-${message.id}`);
+      if (node && node.getBoundingClientRect().top <= threshold) current = message;
+    }
+    setActiveMarkerId(current.id);
+  };
+  const scrollToBottom = () => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+  };
+  const toggleMessageBookmark = (messageId, e) => {
+    e?.stopPropagation();
+    updateChat(activeId, chat => ({
+      ...chat,
+      messages: chat.messages.map(m => m.id === messageId ? { ...m, bookmarked: !m.bookmarked } : m),
+      updatedAt: Date.now()
+    }));
+    const wasBookmarked = activeChat?.messages.find(m => m.id === messageId)?.bookmarked;
+    setToast(wasBookmarked ? 'Bookmark removed' : 'Turn bookmarked');
+  };
   const updateChat = (id, fn) => setChats(prev => prev.map(c => c.id === id ? fn(c) : c));
   const startRenameChat = chat => { setRenameDraft(chat.title || ''); setRenamingChatId(chat.id); setChatMenuId(null); };
   const saveRenameChat = (id, e) => { e?.preventDefault(); const title = renameDraft.trim(); if (!title) { setToast('Chat title cannot be empty'); return; } updateChat(id, chat => ({ ...chat, title })); setRenamingChatId(null); };
@@ -171,7 +271,7 @@ export default function App() {
     try {
       if (activeProvider?.enabled === false) throw new Error('Enable this provider in Model settings before using it.');
       if (!activeProvider?.baseUrl?.trim() || !activeProvider?.model?.trim()) throw new Error('Add a base URL and enabled model in Model settings for this provider.');
-      if (!activeProvider?.apiKey?.trim()) throw new Error('Add an API key in Settings → Connection for this provider.');
+      if (!activeProvider?.apiKey?.trim()) throw new Error('Add an API key in Settings → Models for this provider.');
       const previous = historyOverride ?? chat.messages;
       const libraryInstruction = sourceAttachments.length ? `Use the selected Knowledge Library sources as context when they are relevant. Cite their filename in your answer when you draw on them, and say when the sources do not contain the answer.` : '';
       const system = [settings.persona, settings.systemPrompt, libraryInstruction].filter(Boolean).join('\n\n');
@@ -182,7 +282,34 @@ export default function App() {
       let extraHeaders = {}; if (activeProvider.extraHeaders?.trim()) { try { extraHeaders = JSON.parse(activeProvider.extraHeaders); if (!extraHeaders || Array.isArray(extraHeaders) || typeof extraHeaders !== 'object') throw new Error(); } catch { throw new Error('Custom headers must be valid JSON, for example: {"HTTP-Referer":"https://your-site.com"}'); } }
       const payload = { model: activeProvider.model, messages, stream: true, temperature: Number(settings.temperature) };
       if (!settings.unlimitedOutput) payload.max_tokens = Number(settings.maxTokens);
-      const res = await fetch(endpoint, { method: 'POST', signal: controller.signal, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${activeProvider.apiKey}`, ...extraHeaders }, body: JSON.stringify(payload) });
+
+      const requestHeaders = { 'Content-Type': 'application/json', Authorization: `Bearer ${activeProvider.apiKey}`, ...extraHeaders };
+      let res;
+      try {
+        res = await fetch(endpoint, { method: 'POST', signal: controller.signal, headers: requestHeaders, body: JSON.stringify(payload) });
+      } catch (directErr) {
+        if (directErr.name === 'AbortError') throw directErr;
+        // Direct browser fetch failed (e.g. provider CORS restriction on deployed domain). Seamlessly retry via /api/proxy
+        try {
+          res = await fetch('/api/proxy', {
+            method: 'POST',
+            signal: controller.signal,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ endpoint, headers: requestHeaders, body: payload })
+          });
+          if (res.status === 404 || res.status === 405) {
+            throw new Error(`Direct connection was blocked by CORS (${directErr.message}), and /api/proxy is not available on this server.`);
+          }
+        } catch (proxyErr) {
+          if (proxyErr.name === 'AbortError') throw proxyErr;
+          throw new Error(
+            `Connection error: Unable to reach ${activeProvider.name || activeProvider.baseUrl}. ` +
+            `This happens when the API provider does not allow browser requests from deployed domains (CORS error). ` +
+            `Ensure your serverless proxy (/api/proxy) is deployed, or use a CORS-enabled provider like OpenRouter or Gemini.`
+          );
+        }
+      }
+
       if (!res.ok) { const body = await res.text(); let detail = body; try { detail = JSON.parse(body).error?.message || body; } catch {} throw new Error(`Provider error (${res.status}): ${detail.slice(0, 360)}`); }
       if (!res.body) throw new Error('This provider did not return a streaming response.');
       const reader = res.body.getReader(); const decoder = new TextDecoder(); let buffer = ''; let answer = '';
@@ -254,8 +381,14 @@ export default function App() {
 
   return <div className="app-shell" data-theme={appTheme}>
     <aside className={`sidebar ${sidebarOpen ? 'sidebar-open' : 'sidebar-closed'} ${mobileSidebar ? 'mobile-visible' : ''}`}>
-      <div className="sidebar-top"><a className="brand" href="#" onClick={e => e.preventDefault()}><span className="brand-mark"><MessageSquare size={15}/></span>{sidebarOpen && <span>forma<span className="brand-period">.</span></span>}</a>
-        <button className="icon-btn collapse-btn" title={window.matchMedia?.('(max-width: 560px)').matches ? mobileSidebar ? 'Close navigation' : 'Open navigation' : sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'} aria-label={window.matchMedia?.('(max-width: 560px)').matches ? mobileSidebar ? 'Close navigation' : 'Open navigation' : sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'} aria-expanded={window.matchMedia?.('(max-width: 560px)').matches ? mobileSidebar : sidebarOpen} onClick={() => { if (window.matchMedia?.('(max-width: 560px)').matches) setMobileSidebar(false); else setSidebarOpen(open => !open); }}>{sidebarOpen ? <PanelLeftClose size={18}/> : <PanelLeftOpen size={18}/>}</button></div>
+      <div className="sidebar-top">
+        <a className="brand" href="#" onClick={e => e.preventDefault()}><span className="brand-mark"><MessageSquare size={15}/></span>{sidebarOpen && <span>forma<span className="brand-period">.</span></span>}</a>
+        {mobileSidebar ? (
+          <button className="icon-btn mobile-sidebar-close" aria-label="Close navigation" onClick={() => setMobileSidebar(false)}><X size={18}/></button>
+        ) : (
+          <button className="icon-btn collapse-btn" title={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'} aria-label={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'} aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(open => !open)}>{sidebarOpen ? <PanelLeftClose size={18}/> : <PanelLeftOpen size={18}/>}</button>
+        )}
+      </div>
       <button className={`new-chat ${sidebarOpen ? '' : 'icon-new'}`} onClick={makeChat} title="New chat"><Plus size={17}/>{sidebarOpen && <><span>New chat</span><kbd>{shortcutLabel}</kbd></>}</button>
       {sidebarOpen && <><label className="search-field"><Search size={15}/><input ref={searchRef} placeholder={showArchived ? 'Search archived chats' : 'Search chats and messages'} value={query} onChange={e => setQuery(e.target.value)}/><kbd>/</kbd></label>
       <button className={`archive-view-button ${showArchived ? 'archive-view-active' : ''}`} onClick={() => { setShowArchived(value => !value); setChatMenuId(null); }}><Archive size={14}/><span>{showArchived ? 'All chats' : 'Archived'}</span>{!showArchived && archivedCount > 0 && <small>{archivedCount}</small>}</button>
@@ -266,13 +399,330 @@ export default function App() {
     </aside>
     {mobileSidebar && <button className="mobile-scrim" onClick={() => setMobileSidebar(false)} aria-label="Close navigation"/>}
     <main className="main-pane">
-      <header className="topbar"><div className="top-left"><button className="icon-btn mobile-menu" aria-label="Open navigation" aria-expanded={mobileSidebar} onClick={() => { setSidebarOpen(true); setMobileSidebar(true); }}><Menu size={19}/></button><div className="model-switch provider-switch"><select aria-label="Active provider" value={activeProvider.id} onChange={e => { setActiveProviderId(e.target.value); setEditingProviderId(e.target.value); }}><optgroup label="Providers">{providers.filter(p => p.enabled !== false).map(p => <option key={p.id} value={p.id}>{p.name} · {p.model || 'Choose a model'}</option>)}</optgroup></select><ChevronDown size={14}/></div><span className="provider-status"><span className={`status-dot ${activeProviderConfigured ? 'status-on' : ''}`}></span>{activeProviderConfigured ? 'Configured' : 'Setup provider'}</span></div><div className="top-actions"><button className="icon-btn knowledge-trigger" title="Knowledge Library" onClick={() => setLibraryOpen(true)}><FileText size={17}/></button><button className="icon-btn top-export" title="Export chats" onClick={exportChats}><Download size={17}/></button><button className="icon-btn settings-trigger" onClick={() => { setEditingProviderId(activeProviderId); setSettingsTab('connection'); setSettingsOpen(true); }} title="Model settings"><Settings2 size={18}/></button></div></header>
+      <header className="topbar">
+        <div className="top-left">
+          <button className="icon-btn mobile-menu" aria-label="Open navigation" aria-expanded={mobileSidebar} onClick={() => { setSidebarOpen(true); setMobileSidebar(true); }}><Menu size={19}/></button>
+          <div className="model-switch provider-switch">
+            <select aria-label="Active provider" value={activeProvider.id} onChange={e => { setActiveProviderId(e.target.value); setEditingProviderId(e.target.value); }}>
+              <optgroup label="Providers">{providers.filter(p => p.enabled !== false).map(p => <option key={p.id} value={p.id}>{p.name} · {p.model || 'Choose a model'}</option>)}</optgroup>
+            </select>
+            <ChevronDown size={14}/>
+          </div>
+          <span className="provider-status"><span className={`status-dot ${activeProviderConfigured ? 'status-on' : ''}`}></span>{activeProviderConfigured ? 'Configured' : 'Setup provider'}</span>
+        </div>
+        <div className="top-actions">
+          {activeChat?.messages?.length > 0 && (
+            <>
+              <button
+                className={`icon-btn outline-topbar-btn ${outlineOpen ? 'icon-btn-active' : ''}`}
+                title={outlineOpen ? 'Hide outline' : 'Conversation outline'}
+                aria-label="Conversation outline"
+                onClick={() => setOutlineOpen(v => !v)}
+              >
+                <Compass size={17} />
+              </button>
+              <button
+                className={`icon-btn inchat-search-toggle ${inChatSearchOpen ? 'icon-btn-active' : ''}`}
+                title="Search in conversation (Ctrl+F)"
+                aria-label="Search in conversation"
+                onClick={() => {
+                  setInChatSearchOpen(v => {
+                    if (!v) setTimeout(() => inChatSearchInputRef.current?.focus(), 50);
+                    return !v;
+                  });
+                }}
+              >
+                <Search size={17}/>
+              </button>
+            </>
+          )}
+          <button className="icon-btn knowledge-trigger" title="Knowledge Library" onClick={() => setLibraryOpen(true)}><FileText size={17}/></button>
+          <button className="icon-btn top-export" title="Export chats" onClick={exportChats}><Download size={17}/></button>
+          <button className="icon-btn settings-trigger" onClick={() => { setEditingProviderId(activeProviderId); setSettingsTab('connection'); setSettingsOpen(true); }} title="Model settings"><Settings2 size={18}/></button>
+        </div>
+      </header>
+
+      {inChatSearchOpen && (
+        <div className="inchat-search-bar" role="search">
+          <Search size={15} className="inchat-search-icon" />
+          <input
+            ref={inChatSearchInputRef}
+            autoFocus
+            placeholder="Search in this chat…"
+            value={inChatSearchQuery}
+            onChange={e => { setInChatSearchQuery(e.target.value); setInChatSearchIndex(0); }}
+            onKeyDown={e => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                jumpToSearchMatch(e.shiftKey ? -1 : 1);
+              } else if (e.key === 'Escape') {
+                setInChatSearchOpen(false);
+              }
+            }}
+          />
+          <span className="inchat-search-count">
+            {inChatSearchQuery.trim()
+              ? matchingMessages.length
+                ? `${inChatSearchIndex + 1} of ${matchingMessages.length}`
+                : 'No matches'
+              : 'Type to find'}
+          </span>
+          <button
+            className="icon-btn mini"
+            title="Previous match (Shift+Enter)"
+            disabled={matchingMessages.length <= 1}
+            onClick={() => jumpToSearchMatch(-1)}
+          >
+            <ChevronUp size={14} />
+          </button>
+          <button
+            className="icon-btn mini"
+            title="Next match (Enter)"
+            disabled={matchingMessages.length <= 1}
+            onClick={() => jumpToSearchMatch(1)}
+          >
+            <ChevronDown size={14} />
+          </button>
+          <button
+            className="icon-btn mini"
+            title="Close search"
+            onClick={() => setInChatSearchOpen(false)}
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
       <div className="conversation-layout">
-      <div className={`conversation ${activeChat?.messages?.length ? 'conversation-active' : ''}`} ref={scrollRef} onScroll={syncActiveMarker}>
-        {!activeChat?.messages?.length ? <div className="welcome-wrap"><div className="welcome-content"><h1>What can I help with?</h1><p className="welcome-desc">Ask a question, or add a file to get started.</p><div className="prompt-grid">{starterPrompts.map(({icon: Icon,title,text}) => <button className="prompt-card" key={title} onClick={() => { setInput(text); textareaRef.current?.focus(); }}><span className="prompt-icon"><Icon size={17}/></span><span className="prompt-title">{title}</span><span className="prompt-text">{text}</span><ArrowUp className="prompt-arrow" size={14}/></button>)}</div></div></div>
-        : <div className="messages-wrap">{activeChat.messages.map((m, i) => <Message key={m.id} message={m} assistantName={settings.name || 'Assistant'} isLast={i === activeChat.messages.length - 1} busy={busy} onEditSubmit={editAndResend} onBranch={branchFromMessage} onRegenerate={regenerateFrom} onRetry={() => { const lastUserIndex = activeChat.messages.map(x => x.role).lastIndexOf('user'); if (lastUserIndex < 0) return; const lastUser = activeChat.messages[lastUserIndex]; const history = activeChat.messages.slice(0, lastUserIndex); updateChat(activeId,c=>({...c,messages:history})); send(lastUser.content || '', lastUser.attachments || [], history); }}/>)}</div>}
-      </div>
-      {userMessages.length > 0 && <nav className="message-nav-rail" aria-label="Jump to a message in this chat">{userMessages.map((m, index) => { const messageIndex = activeChat.messages.indexOf(m); const answer = activeChat.messages.slice(messageIndex + 1).find(x => x.role === 'assistant'); const question = (m.content || m.attachments?.map(f => f.name).join(', ') || 'File attachment').trim(); const preview = answer?.content || (answer?.error ? 'Response error' : answer?.streaming ? 'Response in progress…' : 'No response yet'); return <button className={`message-nav-marker ${activeMarkerId === m.id ? 'message-nav-marker-active' : ''}`} key={m.id} style={{ top: `${((index + 1) / (userMessages.length + 1)) * 100}%` }} aria-label={`Jump to message ${index + 1}: ${question}`} onClick={() => jumpToMessage(m.id)}><span className="message-nav-tick"/><span className="message-nav-tooltip"><b>{question}</b><small>{preview}</small></span></button>; })}</nav>}
+        <div className={`conversation ${activeChat?.messages?.length ? 'conversation-active' : ''}`} ref={scrollRef} onScroll={syncActiveMarker}>
+          {!activeChat?.messages?.length ? (
+            <div className="welcome-wrap">
+              <div className="welcome-content">
+                <h1>What can I help with?</h1>
+                <p className="welcome-desc">Ask a question, or add a file to get started.</p>
+                <div className="prompt-grid">
+                  {starterPrompts.map(({icon: Icon,title,text}) => (
+                    <button className="prompt-card" key={title} onClick={() => { setInput(text); textareaRef.current?.focus(); }}>
+                      <span className="prompt-icon"><Icon size={17}/></span>
+                      <span className="prompt-title">{title}</span>
+                      <span className="prompt-text">{text}</span>
+                      <ArrowUp className="prompt-arrow" size={14}/>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="messages-wrap">
+              {activeChat.messages.map((m, i) => (
+                <Message
+                  key={m.id}
+                  message={m}
+                  assistantName={settings.name || 'Assistant'}
+                  isLast={i === activeChat.messages.length - 1}
+                  busy={busy}
+                  onEditSubmit={editAndResend}
+                  onBranch={branchFromMessage}
+                  onRegenerate={regenerateFrom}
+                  onToggleBookmark={() => toggleMessageBookmark(m.id)}
+                  onRetry={() => {
+                    const lastUserIndex = activeChat.messages.map(x => x.role).lastIndexOf('user');
+                    if (lastUserIndex < 0) return;
+                    const lastUser = activeChat.messages[lastUserIndex];
+                    const history = activeChat.messages.slice(0, lastUserIndex);
+                    updateChat(activeId, c => ({ ...c, messages: history }));
+                    send(lastUser.content || '', lastUser.attachments || [], history);
+                  }}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Floating scroll to bottom button */}
+        {showScrollBottom && (
+          <button
+            className={`inchat-scroll-bottom ${busy ? 'inchat-scroll-bottom-busy' : ''}`}
+            onClick={scrollToBottom}
+            title="Scroll to latest message"
+            aria-label="Scroll to bottom"
+          >
+            <ArrowDown size={16} />
+            {busy && <span className="inchat-scroll-pulse" />}
+          </button>
+        )}
+
+        {/* In-Chat Outline Panel (ChatGPT-style Table of Contents) */}
+        {outlineOpen && userMessages.length > 0 && (
+          <>
+            <div className="inchat-outline-backdrop" onClick={() => setOutlineOpen(false)} aria-label="Close outline" />
+            <aside className="inchat-outline-panel" aria-label="Conversation outline">
+              <div className="inchat-outline-head">
+                <div className="inchat-outline-title">
+                  <Compass size={15} />
+                  <span>Outline</span>
+                  <small>{userMessages.length}</small>
+                </div>
+                <button className="icon-btn mini" onClick={() => setOutlineOpen(false)} title="Close outline">
+                  <X size={14} />
+                </button>
+              </div>
+              <div className="inchat-outline-filter">
+                <button
+                  className={outlineFilter === 'all' ? 'active' : ''}
+                  onClick={() => setOutlineFilter('all')}
+                >
+                  All turns ({userMessages.length})
+                </button>
+                <button
+                  className={outlineFilter === 'bookmarked' ? 'active' : ''}
+                  onClick={() => setOutlineFilter('bookmarked')}
+                >
+                  Saved ({userMessages.filter(m => m.bookmarked).length})
+                </button>
+              </div>
+              <div className="inchat-outline-list">
+                {userMessages
+                  .filter(m => outlineFilter === 'all' || m.bookmarked)
+                  .map((m) => {
+                    const actualIndex = userMessages.indexOf(m);
+                    const question = (m.content || m.attachments?.map(f => f.name).join(', ') || 'File attachment').trim();
+                    const isActive = activeMarkerId === m.id;
+                    return (
+                      <div
+                        key={m.id}
+                        className={`inchat-outline-item ${isActive ? 'inchat-outline-active' : ''}`}
+                        onClick={() => {
+                          jumpToMessage(m.id);
+                          if (window.innerWidth <= 768) setOutlineOpen(false);
+                        }}
+                      >
+                      <span className="inchat-outline-num">#{actualIndex + 1}</span>
+                      <span className="inchat-outline-text" title={question}>{question}</span>
+                      <button
+                        className={`inchat-outline-bm ${m.bookmarked ? 'is-bookmarked' : ''}`}
+                        title={m.bookmarked ? 'Remove bookmark' : 'Bookmark turn'}
+                        onClick={(e) => toggleMessageBookmark(m.id, e)}
+                      >
+                        <Bookmark size={13} fill={m.bookmarked ? 'currentColor' : 'none'} />
+                      </button>
+                    </div>
+                  );
+                })}
+              {outlineFilter === 'bookmarked' && userMessages.filter(m => m.bookmarked).length === 0 && (
+                <div className="inchat-outline-empty">No bookmarked turns yet. Click the bookmark icon on any message to save it here.</div>
+              )}
+            </div>
+          </aside>
+        </>
+      )}
+
+        {/* The Polished Timeline Scrubber & Hover Card matching Image 1 & Image 2 */}
+        {userMessages.length > 0 && (
+          <div className="message-nav-wrapper">
+            <button
+              className={`message-nav-outline-toggle ${outlineOpen ? 'active' : ''}`}
+              onClick={() => setOutlineOpen(v => !v)}
+              title={outlineOpen ? 'Hide outline' : 'Show conversation outline'}
+              aria-label="Conversation outline"
+            >
+              <Compass size={14} />
+            </button>
+
+            <nav
+              className="message-nav-rail"
+              aria-label="Jump to a message in this chat"
+              style={{
+                height: `clamp(110px, calc(${userMessages.length} * 38px + 30px), min(55vh, 440px))`
+              }}
+            >
+              <div className="message-nav-track-line" />
+              {userMessages.map((m, index) => {
+                const messageIndex = activeChat.messages.indexOf(m);
+                const answer = activeChat.messages.slice(messageIndex + 1).find(x => x.role === 'assistant');
+                const question = (m.content || m.attachments?.map(f => f.name).join(', ') || 'File attachment').trim();
+                const preview = answer?.content
+                  ? answer.content.slice(0, 240)
+                  : (answer?.error ? 'Response error' : answer?.streaming ? 'Generating response…' : 'No response yet');
+                const isBookmarked = Boolean(m.bookmarked);
+                const hasFiles = Boolean(m.attachments?.length);
+                const isActive = activeMarkerId === m.id;
+
+                return (
+                  <div
+                    className={`message-nav-item ${isActive ? 'message-nav-item-active' : ''} ${isBookmarked ? 'message-nav-item-bookmarked' : ''} ${hoveredMarkerId === m.id ? 'message-nav-item-hovered' : ''}`}
+                    key={m.id}
+                    style={{ top: `${((index + 0.5) / userMessages.length) * 100}%` }}
+                    onMouseEnter={() => setHoveredMarkerId(m.id)}
+                    onMouseLeave={() => setHoveredMarkerId(null)}
+                  >
+                    <button
+                      className="message-nav-marker-btn"
+                      aria-label={`Jump to turn ${index + 1}: ${question.slice(0, 40)}`}
+                      onClick={() => jumpToMessage(m.id)}
+                      onMouseEnter={() => setHoveredMarkerId(m.id)}
+                      onFocus={() => setHoveredMarkerId(m.id)}
+                      onBlur={() => setHoveredMarkerId(null)}
+                    >
+                      <span className="message-nav-tick-bar" />
+                    </button>
+
+                    {/* Popover card matching Image 1 */}
+                    <div
+                      className="message-nav-card"
+                      onClick={() => jumpToMessage(m.id)}
+                      onMouseEnter={() => setHoveredMarkerId(m.id)}
+                      onMouseLeave={() => setHoveredMarkerId(null)}
+                    >
+                      {hasFiles && (
+                        <div className="message-nav-card-filetag">
+                          <Paperclip size={11} />
+                          <span>{m.attachments.map(f => f.name).join(', ')}</span>
+                        </div>
+                      )}
+                      <div className="message-nav-card-head">
+                        <div className="message-nav-card-title-group">
+                          <span className="message-nav-card-turn">Turn {index + 1}</span>
+                          <h4 className="message-nav-card-title" title={question}>{question}</h4>
+                        </div>
+                        <button
+                          className={`message-nav-card-bookmark ${isBookmarked ? 'is-bookmarked' : ''}`}
+                          title={isBookmarked ? 'Remove bookmark' : 'Bookmark this turn'}
+                          aria-label={isBookmarked ? 'Remove bookmark' : 'Bookmark this turn'}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleMessageBookmark(m.id, e);
+                          }}
+                        >
+                          <Bookmark size={14} fill={isBookmarked ? 'currentColor' : 'none'} />
+                        </button>
+                      </div>
+
+                      <p className="message-nav-card-body">
+                        {preview}
+                      </p>
+
+                      <div className="message-nav-card-foot">
+                        <span className="message-nav-card-meta">
+                          {answer?.streaming ? (
+                            <span className="meta-streaming"><LoaderCircle size={11} className="spin" /> Generating…</span>
+                          ) : answer?.error ? (
+                            <span className="meta-error"><AlertCircle size={11} /> Error</span>
+                          ) : (
+                            formatMessageTime(m.createdAt) || `Turn ${index + 1}`
+                          )}
+                        </span>
+                        <span className="message-nav-card-jump">
+                          Jump to turn <ChevronRight size={12} />
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </nav>
+          </div>
+        )}
       </div>
       <div className="composer-area"><div className="composer-wrap"><div className="file-previews">{files.map(f => { const Icon = fileIcon(f.type); return <div className="file-chip" key={f.id}>{f.image && f.dataUrl ? <img src={f.dataUrl} alt=""/> : <span className="file-chip-icon"><Icon size={15}/></span>}<span className="file-chip-text"><b>{f.name}</b><small>{formatSize(f.size)}</small></span><button onClick={() => setFiles(v => v.filter(x => x.id !== f.id))}><X size={13}/></button></div>; })}</div>
         <div className="composer"><textarea ref={textareaRef} rows="1" placeholder={activeChat?.messages?.length ? 'Message Ari…' : 'Ask anything, or start with a file…'} value={input} onChange={e => { setInput(e.target.value); e.target.style.height = 'auto'; e.target.style.height = `${Math.min(e.target.scrollHeight, 180)}px`; }} onKeyDown={handleKeyDown}/><div className="composer-toolbar"><div className="composer-tools"><button className="tool-btn attach-btn" onClick={() => fileRef.current?.click()} title="Attach files"><Paperclip size={17}/><span>Attach</span></button><input ref={fileRef} type="file" multiple hidden onChange={e => { onFiles(e.target.files); e.target.value = ''; }}/><button className={`tool-btn library-chip ${activeLibrarySources.length ? 'library-chip-active' : ''}`} onClick={() => setLibraryOpen(true)} title="Choose knowledge sources"><FileText size={15}/><span>Sources{activeLibrarySources.length ? ` · ${activeLibrarySources.length}` : ''}</span></button><span className="tool-separator"/><button className="tool-btn persona-chip" onClick={() => { setSettingsTab('persona'); setSettingsOpen(true); }}><UserRound size={14}/><span>{settings.name || 'Ari'} <span className="persona-live">·</span> persona</span></button></div><div className="send-group"><span className="send-hint">Shift + Enter for a new line</span><button className={`send-btn ${busy ? 'send-stop' : ''}`} title={busy ? 'Stop response' : 'Send message'} onClick={() => busy ? abortRef.current?.abort() : send()} disabled={!busy && !input.trim() && !files.length}>{busy ? <span className="stop-square"/> : <ArrowUp size={17}/>}</button></div></div></div><div className="composer-caption">Your conversations stay on this device. Your API key is stored locally in your browser.</div></div></div>
@@ -281,7 +731,7 @@ export default function App() {
     {settingsOpen && <div className="modal-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) setSettingsOpen(false); }}><div className={`settings-modal ${settingsTab === 'connection' ? 'model-settings-modal' : ''}`}><div className="modal-head"><div><div className="modal-kicker">{settingsTab === 'connection' ? 'MODEL SETTINGS' : 'PREFERENCES'}</div><h2>{settingsTab === 'connection' ? 'Model settings' : 'Settings'}</h2></div><button className="icon-btn" onClick={() => setSettingsOpen(false)}><X size={19}/></button></div><div className="settings-layout"><nav className="settings-nav"><button className={settingsTab==='connection'?'nav-active':''} onClick={() => setSettingsTab('connection')}><KeyRound size={16}/> Models</button><button className={settingsTab==='persona'?'nav-active':''} onClick={() => setSettingsTab('persona')}><UserRound size={16}/> Persona</button><button className={settingsTab==='preferences'?'nav-active':''} onClick={() => setSettingsTab('preferences')}><SlidersHorizontal size={16}/> Preferences</button></nav><div className="settings-content">
           {settingsTab==='connection' && <div className="provider-manager-layout">
             <aside className="provider-list-panel"><div className="provider-list-caption">Providers</div>{providers.map(p => <button key={p.id} className={`provider-list-item ${p.id === editingProviderId ? 'provider-list-selected' : ''} ${p.enabled === false ? 'provider-list-disabled' : ''}`} onClick={() => { setEditingProviderId(p.id); setModelEntryOpen(false); setEditingModelId(''); }}><span className="provider-list-icon"><Globe2 size={15}/></span><span className="provider-list-copy"><b>{p.name || 'Unnamed provider'}</b><small>{p.id === activeProviderId ? 'Active · ' : ''}{p.model || p.baseUrl || 'Needs setup'}</small></span><span className={`provider-list-dot ${p.enabled === false ? 'dot-disabled' : p.apiKey && p.baseUrl && p.model ? 'dot-ready' : 'dot-incomplete'}`}/></button>)}<button className="provider-add-button" onClick={addProvider}><Plus size={16}/> Add provider</button></aside>
-            <section className="provider-detail-panel"><div className="provider-detail-scroll"><div className="provider-detail-header"><div className="provider-detail-title"><span className="provider-detail-icon"><Globe2 size={17}/></span><input className="provider-title-input" aria-label="Provider name" maxLength="40" value={editingProvider.name || ''} onChange={e => patchProvider({ name:e.target.value })} placeholder="Provider name"/></div><div className="provider-detail-actions"><button className={`provider-state-toggle ${editingProvider.enabled === false ? '' : 'toggle-on'}`} role="switch" aria-checked={editingProvider.enabled !== false} aria-label="Enable provider" onClick={() => toggleProvider(editingProviderId)}><span/></button>{providers.length > 1 && <button className="icon-btn provider-delete-button" title="Remove provider" onClick={removeEditingProvider}><Trash2 size={16}/></button>}</div></div>
+            <section className="provider-detail-panel"><div className="provider-detail-scroll"><div className="provider-detail-header"><div className="provider-detail-title"><span className="provider-detail-icon"><Globe2 size={17}/></span><input className="provider-title-input" aria-label="Provider name" maxLength="40" value={editingProvider.name || ''} onChange={e => patchProvider({ name:e.target.value })} placeholder="Provider name"/></div><div className="provider-detail-actions"><button type="button" className={`provider-activate-button ${editingProvider.id === activeProviderId ? 'provider-activate-current' : ''}`} onClick={() => { setActiveProviderId(editingProviderId); setToast(`Switched active provider to ${editingProvider.name || 'selected provider'}`); }} title={editingProvider.id === activeProviderId ? 'Currently active provider' : 'Make this the active provider'}>{editingProvider.id === activeProviderId ? 'Active' : 'Set active'}</button><button className={`provider-state-toggle ${editingProvider.enabled === false ? '' : 'toggle-on'}`} role="switch" aria-checked={editingProvider.enabled !== false} aria-label="Enable provider" onClick={() => toggleProvider(editingProviderId)}><span/></button>{providers.length > 1 && <button className="icon-btn provider-delete-button" title="Remove provider" onClick={removeEditingProvider}><Trash2 size={16}/></button>}</div></div>
               <label className="form-label">Provider preset</label><select className="form-input" value={editingProvider.baseUrl === 'https://api.openai.com/v1' ? 'openai' : editingProvider.baseUrl === 'https://openrouter.ai/api/v1' ? 'openrouter' : editingProvider.baseUrl === 'https://generativelanguage.googleapis.com/v1beta/openai' ? 'google' : 'custom'} onChange={e => applyProviderPreset(e.target.value)}><option value="custom">Custom OpenAI-compatible</option><option value="openai">OpenAI</option><option value="openrouter">OpenRouter</option><option value="google">Google Gemini</option></select>
               <label className="form-label">Base URL</label><input className="form-input" placeholder="https://api.example.com/v1" value={editingProvider.baseUrl || ''} onChange={e => patchProvider({ baseUrl:e.target.value })}/>
               <label className="form-label">API key</label><div className="input-with-action"><KeyRound size={15}/><input className="form-input" type={keyVisible?'text':'password'} placeholder="Paste your secret key" value={editingProvider.apiKey || ''} onChange={e => patchProvider({ apiKey:e.target.value })}/><button onClick={() => setKeyVisible(!keyVisible)}>{keyVisible?<EyeOff size={16}/>:<Eye size={16}/>}</button></div>
@@ -300,7 +750,7 @@ export default function App() {
   </div>;
 }
 
-function Message({ message, onRetry, onEditSubmit, onBranch, onRegenerate, assistantName = 'Assistant', busy = false }) {
+function Message({ message, onRetry, onEditSubmit, onBranch, onRegenerate, onToggleBookmark, assistantName = 'Assistant', busy = false }) {
   const [copied, setCopied] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(message.content || '');
@@ -326,13 +776,11 @@ function Message({ message, onRetry, onEditSubmit, onBranch, onRegenerate, assis
         {message.streaming && <div className="typing-dots"><i/><i/><i/></div>}
         {message.error && <div className="error-card"><AlertCircle size={16}/><span>{message.error}</span><button onClick={onRetry}>Try again</button></div>}
       </div>
-      {user && !editing && <div className="message-actions user-message-actions"><time className="message-time">{formatMessageTime(message.createdAt)}</time><button title={copied ? 'Copied' : 'Copy message'} aria-label={copied ? 'Copied' : 'Copy message'} onClick={copy}>{copied ? <Check size={15}/> : <Copy size={15}/>}<span>{copied ? 'Copied' : 'Copy'}</span></button><button title="Edit message" aria-label="Edit message" disabled={busy} onClick={() => { setDraft(message.content || ''); setEditing(true); }}><SquarePen size={15}/><span>Edit</span></button><button title="Branch from message" aria-label="Branch from message" disabled={busy} onClick={() => onBranch(message)}><GitBranch size={15}/><span>Branch</span></button></div>}
-      {!user && !message.streaming && !message.error && message.content && <div className="message-actions"><button title={copied ? 'Copied' : 'Copy response'} aria-label={copied ? 'Copied' : 'Copy response'} onClick={copy}>{copied ? <Check size={15}/> : <Copy size={15}/>}<span>{copied ? 'Copied' : 'Copy'}</span></button><button title="Regenerate response" aria-label="Regenerate response" disabled={busy} onClick={() => onRegenerate(message)}><RotateCcw size={15}/><span>Regenerate</span></button><button title="Branch from response" aria-label="Branch from response" disabled={busy} onClick={() => onBranch(message)}><GitBranch size={15}/><span>Branch</span></button></div>}
+      {user && !editing && <div className="message-actions user-message-actions"><time className="message-time">{formatMessageTime(message.createdAt)}</time><button title={copied ? 'Copied' : 'Copy message'} aria-label={copied ? 'Copied' : 'Copy message'} onClick={copy}>{copied ? <Check size={15}/> : <Copy size={15}/>}<span>{copied ? 'Copied' : 'Copy'}</span></button><button className={message.bookmarked ? 'bookmarked-action' : ''} title={message.bookmarked ? 'Remove bookmark' : 'Bookmark turn'} aria-label={message.bookmarked ? 'Remove bookmark' : 'Bookmark turn'} onClick={onToggleBookmark}><Bookmark size={15} fill={message.bookmarked ? 'currentColor' : 'none'}/><span>{message.bookmarked ? 'Saved' : 'Bookmark'}</span></button><button title="Edit message" aria-label="Edit message" disabled={busy} onClick={() => { setDraft(message.content || ''); setEditing(true); }}><SquarePen size={15}/><span>Edit</span></button><button title="Branch from message" aria-label="Branch from message" disabled={busy} onClick={() => onBranch(message)}><GitBranch size={15}/><span>Branch</span></button></div>}
+      {!user && !message.streaming && !message.error && message.content && <div className="message-actions"><button title={copied ? 'Copied' : 'Copy response'} aria-label={copied ? 'Copied' : 'Copy response'} onClick={copy}>{copied ? <Check size={15}/> : <Copy size={15}/>}<span>{copied ? 'Copied' : 'Copy'}</span></button><button className={message.bookmarked ? 'bookmarked-action' : ''} title={message.bookmarked ? 'Remove bookmark' : 'Bookmark response'} aria-label={message.bookmarked ? 'Remove bookmark' : 'Bookmark response'} onClick={onToggleBookmark}><Bookmark size={15} fill={message.bookmarked ? 'currentColor' : 'none'}/><span>{message.bookmarked ? 'Saved' : 'Bookmark'}</span></button><button title="Regenerate response" aria-label="Regenerate response" disabled={busy} onClick={() => onRegenerate(message)}><RotateCcw size={15}/><span>Regenerate</span></button><button title="Branch from response" aria-label="Branch from response" disabled={busy} onClick={() => onBranch(message)}><GitBranch size={15}/><span>Branch</span></button></div>}
     </div>
   </article>;
 }
-
-const formatMessageTime = value => value ? new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(new Date(value)) : '';
 const makePromptParts = (intro, rawPrompt) => {
   const outroStart = /\n{2,}(?=(?:a quick tip|that(?:'|’)s it!?|let me know if you|if you(?:'|’)d like))/i.exec(rawPrompt);
   const prompt = outroStart ? rawPrompt.slice(0, outroStart.index).trim() : rawPrompt.trim();
@@ -388,6 +836,205 @@ function extractCodeSource(node) {
   return String(node);
 }
 
+function tokenizeGenericCode(source, lang) {
+  const isCss = lang === 'css';
+  const tokens = [];
+  const pattern = isCss
+    ? /(\/\*[\s\S]*?\*\/)|("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')|(#(?:[0-9a-fA-F]{3,8})\b)|(\b\d+(?:\.\d+)?(?:px|rem|em|vh|vw|%|s|ms|deg)?\b)|(\b(?:display|position|color|background|padding|margin|border|width|height|font|flex|grid|align-items|justify-content|transform|transition|animation|box-shadow|overflow|border-radius|z-index|opacity|cursor|gap)\b)|([{}();:,])/g
+    : /(\/\*[\s\S]*?\*\/|\/\/[^\n]*|#[^\n]*)|(`(?:\\.|[^`])*`|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')|(\b(?:async|await|break|case|catch|class|const|continue|def|default|delete|do|else|export|extends|false|finally|for|from|function|if|import|in|instanceof|let|new|null|return|self|static|super|switch|this|throw|true|try|typeof|var|void|while|with|yield)\b)|(\b\d+(?:\.\d+)?\b)|([{}()\[\].,;:]|=>|===|!==|==|!=|<=|>=|[+\-*\/%=<>!&|^~?])/g;
+
+  let cursor = 0;
+  let match;
+  while ((match = pattern.exec(source)) !== null) {
+    if (match.index > cursor) tokens.push({ text: source.slice(cursor, match.index), type: 'plain' });
+    const text = match[0];
+    let type = 'plain';
+    if (isCss) {
+      if (match[1]) type = 'comment';
+      else if (match[2]) type = 'string';
+      else if (match[3]) type = 'color';
+      else if (match[4]) type = 'number';
+      else if (match[5]) type = 'keyword';
+      else if (match[6]) type = 'punctuation';
+    } else {
+      if (match[1]) type = 'comment';
+      else if (match[2]) type = 'string';
+      else if (match[3]) type = 'keyword';
+      else if (match[4]) type = 'number';
+      else if (match[5]) type = 'punctuation';
+    }
+    tokens.push({ text, type });
+    cursor = match.index + text.length;
+  }
+  if (cursor < source.length) tokens.push({ text: source.slice(cursor), type: 'plain' });
+  return tokens;
+}
+
+function tokenizeCode(source, language) {
+  const langLower = (language || '').toLowerCase();
+  const isHtmlLike = ['html', 'htm', 'svg', 'xml', 'markup'].includes(langLower);
+  const tokens = [];
+
+  if (isHtmlLike) {
+    let index = 0;
+    const len = source.length;
+    while (index < len) {
+      if (source.startsWith('<!--', index)) {
+        const end = source.indexOf('-->', index);
+        const commentEnd = end === -1 ? len : end + 3;
+        tokens.push({ text: source.slice(index, commentEnd), type: 'comment' });
+        index = commentEnd;
+        continue;
+      }
+      if (source.startsWith('<!', index)) {
+        const end = source.indexOf('>', index);
+        const metaEnd = end === -1 ? len : end + 1;
+        tokens.push({ text: source.slice(index, metaEnd), type: 'doctype' });
+        index = metaEnd;
+        continue;
+      }
+      if (source[index] === '<') {
+        const isClosing = source[index + 1] === '/';
+        index += isClosing ? 2 : 1;
+        let tagName = '';
+        while (index < len && /[a-zA-Z0-9:-]/.test(source[index])) {
+          tagName += source[index];
+          index++;
+        }
+        tokens.push({ text: isClosing ? '</' : '<', type: 'tag-bracket' });
+        if (tagName) tokens.push({ text: tagName, type: 'tag-name' });
+        while (index < len && source[index] !== '>' && !(source[index] === '/' && source[index + 1] === '>')) {
+          if (/\s/.test(source[index])) {
+            let ws = '';
+            while (index < len && /\s/.test(source[index])) { ws += source[index]; index++; }
+            tokens.push({ text: ws, type: 'plain' });
+            continue;
+          }
+          if (/[a-zA-Z0-9_:-]/.test(source[index])) {
+            let attrName = '';
+            while (index < len && /[a-zA-Z0-9_:-]/.test(source[index])) { attrName += source[index]; index++; }
+            tokens.push({ text: attrName, type: 'attr-name' });
+            continue;
+          }
+          if (source[index] === '=') {
+            tokens.push({ text: '=', type: 'attr-equals' });
+            index++;
+            continue;
+          }
+          if (source[index] === '"' || source[index] === "'") {
+            const quote = source[index];
+            let val = quote;
+            index++;
+            while (index < len && source[index] !== quote) {
+              if (source[index] === '\\' && index + 1 < len) {
+                val += source[index] + source[index + 1];
+                index += 2;
+              } else {
+                val += source[index];
+                index++;
+              }
+            }
+            if (index < len) { val += source[index]; index++; }
+            tokens.push({ text: val, type: 'attr-value' });
+            continue;
+          }
+          tokens.push({ text: source[index], type: 'plain' });
+          index++;
+        }
+        if (source[index] === '/' && source[index + 1] === '>') {
+          tokens.push({ text: '/>', type: 'tag-bracket' });
+          index += 2;
+        } else if (source[index] === '>') {
+          tokens.push({ text: '>', type: 'tag-bracket' });
+          index++;
+        }
+        const lowerTagName = tagName.toLowerCase();
+        if (!isClosing && lowerTagName === 'script') {
+          const scriptCloseIdx = source.toLowerCase().indexOf('</script', index);
+          const scriptEnd = scriptCloseIdx === -1 ? len : scriptCloseIdx;
+          if (scriptEnd > index) {
+            tokens.push(...tokenizeGenericCode(source.slice(index, scriptEnd), 'javascript'));
+            index = scriptEnd;
+          }
+        } else if (!isClosing && lowerTagName === 'style') {
+          const styleCloseIdx = source.toLowerCase().indexOf('</style', index);
+          const styleEnd = styleCloseIdx === -1 ? len : styleCloseIdx;
+          if (styleEnd > index) {
+            tokens.push(...tokenizeGenericCode(source.slice(index, styleEnd), 'css'));
+            index = styleEnd;
+          }
+        }
+        continue;
+      }
+      if (source[index] === '&') {
+        const semi = source.indexOf(';', index);
+        if (semi !== -1 && semi - index < 10) {
+          tokens.push({ text: source.slice(index, semi + 1), type: 'entity' });
+          index = semi + 1;
+          continue;
+        }
+      }
+      let nextSpecial = source.indexOf('<', index);
+      let nextEntity = source.indexOf('&', index);
+      let nextEnd = len;
+      if (nextSpecial !== -1) nextEnd = Math.min(nextEnd, nextSpecial);
+      if (nextEntity !== -1) nextEnd = Math.min(nextEnd, nextEntity);
+      tokens.push({ text: source.slice(index, nextEnd), type: 'text' });
+      index = nextEnd;
+    }
+  } else {
+    tokens.push(...tokenizeGenericCode(source, langLower));
+  }
+  return tokens;
+}
+
+function tokensToLines(tokens) {
+  const lines = [[]];
+  for (const token of tokens) {
+    const parts = token.text.split('\n');
+    for (let i = 0; i < parts.length; i++) {
+      if (i > 0) lines.push([]);
+      if (parts[i].length > 0) {
+        lines[lines.length - 1].push({ text: parts[i], type: token.type });
+      }
+    }
+  }
+  return lines;
+}
+
+function CodeEditorContent({ source, language }) {
+  const lines = useMemo(() => {
+    const tokens = tokenizeCode(source, language);
+    return tokensToLines(tokens);
+  }, [source, language]);
+
+  return (
+    <div className="code-lines-wrapper">
+      {lines.map((lineTokens, lineIdx) => {
+        const lineNum = lineIdx + 1;
+        return (
+          <div className="code-line" key={lineIdx}>
+            <span className="code-gutter-cell" aria-hidden="true">
+              {lineNum}
+            </span>
+            <span className="code-line-text">
+              {lineTokens.length > 0 ? (
+                lineTokens.map((tok, tokIdx) => (
+                  <span key={tokIdx} className={`token token-${tok.type}`}>
+                    {tok.text}
+                  </span>
+                ))
+              ) : (
+                '\u00A0'
+              )}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function buildHtmlPreviewDoc(rawCode) {
   const trimmed = rawCode.trim();
   const isSvg = /^\s*<svg[\s\S]*<\/svg>\s*$/i.test(trimmed);
@@ -411,8 +1058,8 @@ function buildHtmlPreviewDoc(rawCode) {
       overflow: auto;
     }
     svg {
-      max-width: 90%;
-      max-height: 90%;
+      max-width: 92%;
+      max-height: 92%;
       height: auto;
     }
   </style>
@@ -438,9 +1085,16 @@ function buildHtmlPreviewDoc(rawCode) {
 </script>`;
 
   if (/<!DOCTYPE\s+html/i.test(rawCode) || /<html[\s>]/i.test(rawCode)) {
-    if (/<\/head>/i.test(rawCode)) return rawCode.replace(/<\/head>/i, `${errorCatchScript}</head>`);
-    if (/<\/body>/i.test(rawCode)) return rawCode.replace(/<\/body>/i, `${errorCatchScript}</body>`);
-    return rawCode + errorCatchScript;
+    let result = rawCode;
+    if (!/<meta[^>]+viewport/i.test(result)) {
+      const viewportTag = '<meta name="viewport" content="width=device-width, initial-scale=1.0">';
+      if (/<head[\s>]/i.test(result)) {
+        result = result.replace(/<head[\s>]/i, match => `${match}\n  ${viewportTag}`);
+      }
+    }
+    if (/<\/head>/i.test(result)) return result.replace(/<\/head>/i, `${errorCatchScript}\n</head>`);
+    if (/<\/body>/i.test(result)) return result.replace(/<\/body>/i, `${errorCatchScript}\n</body>`);
+    return result + errorCatchScript;
   }
 
   return `<!DOCTYPE html>
@@ -450,9 +1104,14 @@ function buildHtmlPreviewDoc(rawCode) {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
     * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      min-height: 100%;
+    }
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      margin: 0;
       padding: 16px;
       color: #111827;
       background: #ffffff;
@@ -463,6 +1122,25 @@ function buildHtmlPreviewDoc(rawCode) {
 </head>
 <body>
   ${rawCode}
+</body>
+</html>`;
+}
+
+function buildSandboxedPreviewPage(previewDoc) {
+  const escapedSrcDoc = previewDoc.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HTML Preview</title>
+  <style>
+    html, body { width: 100%; height: 100%; margin: 0; padding: 0; overflow: hidden; background: #fff; }
+    iframe { display: block; width: 100%; height: 100%; border: 0; background: #fff; }
+  </style>
+</head>
+<body>
+  <iframe title="HTML Preview" sandbox="allow-scripts allow-modals allow-forms allow-popups" srcdoc="${escapedSrcDoc}"></iframe>
 </body>
 </html>`;
 }
@@ -484,10 +1162,27 @@ function CopyableCodeBlock({ children }) {
   const isMarkup = /^\s*<!DOCTYPE\s+html/i.test(source) || /^\s*<html[\s>]/i.test(source) || (/<\/?[a-z][\s\S]*>/i.test(source) && ['xml', 'markup', 'code', ''].includes(langLower));
   const isPreviewable = isExplicitHtml || isMarkup;
 
+  const closePreview = () => {
+    setIsFullscreen(false);
+    window.getSelection?.()?.removeAllRanges?.();
+  };
+  const openFullscreen = () => {
+    setIsFullscreen(true);
+    window.getSelection?.()?.removeAllRanges?.();
+  };
+  const switchMode = (mode) => {
+    setViewMode(mode);
+    window.getSelection?.()?.removeAllRanges?.();
+  };
+
+  useEffect(() => {
+    window.getSelection?.()?.removeAllRanges?.();
+  }, []);
+
   useEffect(() => {
     if (!isFullscreen) return;
     const handleKeyDown = (e) => {
-      if (e.key === 'Escape') setIsFullscreen(false);
+      if (e.key === 'Escape') closePreview();
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
@@ -504,10 +1199,11 @@ function CopyableCodeBlock({ children }) {
   };
 
   const openInNewTab = () => {
-    const doc = buildHtmlPreviewDoc(source);
-    const blob = new Blob([doc], { type: 'text/html' });
+    const previewPage = buildSandboxedPreviewPage(buildHtmlPreviewDoc(source));
+    const blob = new Blob([previewPage], { type: 'text/html' });
     const url = URL.createObjectURL(blob);
-    window.open(url, '_blank');
+    window.open(url, '_blank', 'noopener,noreferrer');
+    window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
   };
 
   const downloadFile = () => {
@@ -536,13 +1232,13 @@ function CopyableCodeBlock({ children }) {
         <div className="code-head-left">
           <span className="code-lang-tag">{language}</span>
           {isPreviewable && (
-            <div className="code-view-tabs" role="tablist">
+            <div className="code-view-tabs" role="tablist" aria-label="Code display mode">
               <button
                 type="button"
                 role="tab"
                 aria-selected={viewMode === 'code'}
                 className={`code-view-tab ${viewMode === 'code' ? 'active' : ''}`}
-                onClick={() => setViewMode('code')}
+                onClick={() => switchMode('code')}
                 title="View HTML Source Code"
               >
                 <Code2 size={13} />
@@ -553,8 +1249,8 @@ function CopyableCodeBlock({ children }) {
                 role="tab"
                 aria-selected={viewMode === 'preview'}
                 className={`code-view-tab ${viewMode === 'preview' ? 'active' : ''}`}
-                onClick={() => setViewMode('preview')}
-                title="Run & Preview HTML"
+                onClick={() => switchMode('preview')}
+                title="Live HTML Preview"
               >
                 <Play size={13} />
                 <span>Preview</span>
@@ -565,22 +1261,52 @@ function CopyableCodeBlock({ children }) {
         <div className="copyable-card-actions">
           {isPreviewable && viewMode === 'preview' && (
             <>
-              <button title="Refresh preview" aria-label="Refresh preview" onClick={() => setRefreshKey(k => k + 1)}>
+              <button
+                type="button"
+                className="code-action-btn"
+                title="Refresh preview"
+                aria-label="Refresh preview"
+                onClick={() => setRefreshKey(k => k + 1)}
+              >
                 <RotateCcw size={15} />
               </button>
-              <button title="Expand to fullscreen modal" aria-label="Expand preview" onClick={() => setIsFullscreen(true)}>
+              <button
+                type="button"
+                className="code-action-btn"
+                title="Expand to fullscreen modal"
+                aria-label="Expand preview"
+                onClick={openFullscreen}
+              >
                 <Maximize2 size={15} />
               </button>
-              <button title="Open preview in new tab" aria-label="Open in new tab" onClick={openInNewTab}>
+              <button
+                type="button"
+                className="code-action-btn"
+                title="Open preview in new tab"
+                aria-label="Open preview in new tab"
+                onClick={openInNewTab}
+              >
                 <ExternalLink size={15} />
               </button>
             </>
           )}
-          <button title={isPreviewable ? "Download HTML file" : "Download code file"} aria-label="Download code" onClick={downloadFile}>
+          <button
+            type="button"
+            className="code-action-btn"
+            title={isPreviewable ? "Download HTML file" : "Download code file"}
+            aria-label="Download code"
+            onClick={downloadFile}
+          >
             <Download size={15} />
           </button>
-          <button title={copied ? 'Copied' : 'Copy code'} aria-label={copied ? 'Copied' : 'Copy code'} onClick={copy}>
-            {copied ? <Check size={16} /> : <Copy size={16} />}
+          <button
+            type="button"
+            className="code-action-btn"
+            title={copied ? 'Copied' : 'Copy code'}
+            aria-label={copied ? 'Copied' : 'Copy code'}
+            onClick={copy}
+          >
+            {copied ? <Check size={15} /> : <Copy size={15} />}
           </button>
         </div>
       </header>
@@ -596,14 +1322,21 @@ function CopyableCodeBlock({ children }) {
           />
         </div>
       ) : (
-        <pre>{children}</pre>
+        <div
+          className="code-scroll-region"
+          role="region"
+          tabIndex={0}
+          aria-label={`${language} source code`}
+        >
+          <CodeEditorContent source={source} language={langLower} />
+        </div>
       )}
 
       {isFullscreen && (
         <div
           className="prompt-preview-backdrop html-modal-backdrop"
           role="presentation"
-          onMouseDown={e => { if (e.target === e.currentTarget) setIsFullscreen(false); }}
+          onMouseDown={e => { if (e.target === e.currentTarget) closePreview(); }}
         >
           <section className="prompt-preview-dialog html-preview-modal-dialog" role="dialog" aria-modal="true" aria-label="Interactive HTML Sandbox">
             <header className="copyable-card-head html-modal-head">
@@ -649,7 +1382,7 @@ function CopyableCodeBlock({ children }) {
                 <button title="Download HTML" aria-label="Download HTML" onClick={downloadFile}>
                   <Download size={16} />
                 </button>
-                <button title="Close preview" aria-label="Close preview" onClick={() => setIsFullscreen(false)}>
+                <button title="Close preview" aria-label="Close preview" onClick={closePreview}>
                   <X size={19} />
                 </button>
               </div>
