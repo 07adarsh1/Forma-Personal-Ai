@@ -1,19 +1,115 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { openDB } from 'idb';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { MessageSquare, Plus, Search, Settings2, PanelLeftClose, PanelLeftOpen, Paperclip, ArrowUp, Sparkles, BriefcaseBusiness, FileText, Lightbulb, Code2, X, ChevronDown, ChevronUp, ChevronRight, MoreHorizontal, Copy, Check, Trash2, KeyRound, SlidersHorizontal, UserRound, Eye, EyeOff, Upload, SquarePen, GitBranch, RotateCcw, Menu, AlertCircle, LoaderCircle, Command, Globe2, ShieldCheck, Sun, Moon, Download, Image as ImageIcon, File, Mic, AudioLines, Archive, Pin, Maximize2, Play, ExternalLink, Monitor, Tablet, Smartphone, Bookmark, ArrowDown, Compass, ListOrdered } from 'lucide-react';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
+import 'katex/dist/katex.min.css';
+import mermaid from 'mermaid';
+import { MessageSquare, Plus, Search, Settings2, PanelLeftClose, PanelLeftOpen, Paperclip, ArrowUp, Sparkles, BriefcaseBusiness, FileText, Lightbulb, Code2, X, ChevronDown, ChevronUp, ChevronRight, ChevronLeft, MoreHorizontal, Copy, Check, Trash2, KeyRound, SlidersHorizontal, UserRound, Eye, EyeOff, Upload, SquarePen, GitBranch, RotateCcw, Menu, AlertCircle, LoaderCircle, Command, Globe2, ShieldCheck, Sun, Moon, Download, Image as ImageIcon, File, Mic, AudioLines, Archive, Pin, Maximize2, Minimize2, Play, ExternalLink, Monitor, Tablet, Smartphone, Bookmark, ArrowDown, Compass, ListOrdered, Columns2, ArrowLeft, ZoomIn, ZoomOut, Move, Terminal } from 'lucide-react';
+
+
+export const CanvasContext = createContext({
+  canvasArtifact: null,
+  openCanvas: () => {},
+  closeCanvas: () => {},
+  updateCanvasSource: () => {},
+  canvasExpanded: false,
+  setCanvasExpanded: () => {},
+  theme: 'dark',
+});
+
+const formatSize = size => !size ? '0 B' : size < 1024 ? `${size} B` : size < 1048576 ? `${(size / 1024).toFixed(0)} KB` : `${(size / 1048576).toFixed(1)} MB`;
 
 const DEFAULT_SETTINGS = { name: 'Ari', persona: 'You are Ari, a thoughtful, sharp and encouraging personal assistant. Be warm but never overly agreeable. Give clear, useful answers. If the user shares a resume or other documents, use them as the source of truth. Be honest about what you don’t know.', temperature: 0.7, systemPrompt: '', maxTokens: 2048, unlimitedOutput: false, theme: 'dark' };
-const CHAT_KEY = 'forma.chats.v1'; const SET_KEY = 'forma.settings.v1'; const PROVIDER_KEY = 'forma.providers.v1';
+const CHAT_KEY = 'forma.chats.v1'; const SET_KEY = 'forma.settings.v1'; const PROVIDER_KEY = 'forma.providers.v1'; const PERSONA_PRESETS_KEY = 'forma.personas.v1';
 const DEFAULT_PROVIDER = { id: 'provider-default', name: 'Qwen 3.8 Max (xkiro)', baseUrl: 'https://api.xkiro.com/v1', model: 'qwen/qwen3.8-max:free', models: [{ id: 'model-default', name: 'qwen/qwen3.8-max:free', enabled: true }], activeModelId: 'model-default', apiKey: 'sk-xt-e55f20a4f3fa8c9c4be36d39de81dd841531acbc599b1b84', extraHeaders: '', enabled: true };
 const dbPromise = openDB('forma-local', 2, { upgrade(db) { if (!db.objectStoreNames.contains('chats')) db.createObjectStore('chats', { keyPath: 'id' }); if (!db.objectStoreNames.contains('library')) db.createObjectStore('library', { keyPath: 'id' }); } });
-const starterPrompts = [
-  { icon: BriefcaseBusiness, title: 'Explore your experience', text: 'What would you like to know about my background?' },
-  { icon: FileText, title: 'Make sense of a document', text: 'Can you summarize a document I share with you?' },
-  { icon: Lightbulb, title: 'Think something through', text: 'Help me think through a decision I’m making.' },
-  { icon: Code2, title: 'Build something together', text: 'What can you help me create today?' },
+
+export const BUILTIN_PERSONAS = [
+  {
+    id: 'persona-ari',
+    name: 'Ari',
+    badge: 'General Partner',
+    tagline: 'Thoughtful, sharp and encouraging personal AI partner',
+    avatar: 'A',
+    temperature: 0.7,
+    persona: 'You are Ari, a thoughtful, sharp and encouraging personal assistant. Be warm but never overly agreeable. Give clear, useful answers. If the user shares a resume or other documents, use them as the source of truth. Be honest about what you don’t know.',
+    systemPrompt: '',
+    starters: [
+      { icon: BriefcaseBusiness, title: 'Explore experience', text: 'What would you like to know about my background?' },
+      { icon: FileText, title: 'Make sense of a document', text: 'Can you summarize a document I share with you?' },
+      { icon: GitBranch, title: 'Visualize architecture', text: 'Create a detailed Mermaid diagram of a modern cloud microservices architecture with authentication, API gateway, and database.' },
+      { icon: Terminal, title: 'Run Python in sandbox', text: 'Write a Python script that calculates Fibonacci numbers, benchmarks execution time, and plots the curve using Matplotlib.' },
+      { icon: Code2, title: 'Build something together', text: 'What can you help me create today?' },
+    ]
+  },
+  {
+    id: 'persona-atlas',
+    name: 'Atlas',
+    badge: 'Software Architect',
+    tagline: 'Principal Engineer & Systems Architect',
+    avatar: '⚡',
+    temperature: 0.3,
+    persona: 'You are Atlas, a Principal Systems Architect and Staff Engineer. You design resilient, distributed systems, clean domain models, and high-performance full-stack architectures. You generate production-grade code, provide precise Mermaid system/sequence diagrams, and evaluate trade-offs with extreme engineering rigor.',
+    systemPrompt: 'Always prefer modular architectures, explicit error boundaries, and Mermaid visual diagrams for system topologies. Include Big-O considerations when relevant.',
+    starters: [
+      { icon: GitBranch, title: 'Microservices architecture', text: 'Create a detailed Mermaid diagram of a modern cloud microservices architecture with authentication, API gateway, and database.' },
+      { icon: Code2, title: 'Audit code & tech debt', text: 'Review this architecture for scalability bottlenecks, race conditions, and single points of failure.' },
+      { icon: Terminal, title: 'Design API contract', text: 'Draft an idiomatic OpenAPI REST and GraphQL specification for a multi-tenant subscription platform.' },
+      { icon: BriefcaseBusiness, title: 'Evaluate database options', text: 'Compare SQLite + Turso vs Postgres + Neon for a latency-critical edge application.' },
+    ]
+  },
+  {
+    id: 'persona-nova',
+    name: 'Nova',
+    badge: 'Data Scientist',
+    tagline: 'Quantitative Analyst & Python Researcher',
+    avatar: '🔬',
+    temperature: 0.2,
+    persona: 'You are Nova, an expert Quantitative Analyst and Python Data Scientist. You excel in statistical modeling, KaTeX mathematical proofs, NumPy, Pandas, and Matplotlib visualizations. When explaining concepts, provide executable Python sandbox snippets and rigorous formulas.',
+    systemPrompt: 'When mathematical derivations or statistical distributions are discussed, provide KaTeX math formatting ($...$ and $$...$$). Provide runnable Python scripts formatted with ```python blocks.',
+    starters: [
+      { icon: Terminal, title: 'Benchmark & plot curve', text: 'Write a Python script that calculates Fibonacci numbers, benchmarks execution time, and plots the curve using Matplotlib.' },
+      { icon: Sparkles, title: 'Monte Carlo simulation', text: 'Write a Python script to run a Monte Carlo simulation of portfolio risk and plot the distribution.' },
+      { icon: FileText, title: 'Explain mathematical proofs', text: 'Explain Bayes Theorem and derivation with KaTeX equations and real-world Bayesian reasoning.' },
+      { icon: Code2, title: 'Algorithm complexity analysis', text: 'Analyze this algorithm’s time and space complexity with Big-O notation and propose an O(N log N) solution.' },
+    ]
+  },
+  {
+    id: 'persona-sage',
+    name: 'Sage',
+    badge: 'Product Strategist',
+    tagline: 'VP of Product, UX & Conversion Optimization',
+    avatar: '🎯',
+    temperature: 0.6,
+    persona: 'You are Sage, a seasoned VP of Product and Growth Strategist. You specialize in rapid product discovery, user journeys, conversion rate optimization (CRO), North Star metrics, and competitive differentiation. You cut through fluff with crisp, prioritized frameworks.',
+    systemPrompt: 'Prioritize actionable user value, customer friction removal, and clear metrics. Use bullet points and table matrices for trade-offs.',
+    starters: [
+      { icon: BriefcaseBusiness, title: 'Draft Product Spec (PRD)', text: 'Write a crisp PRD for a real-time collaborative canvas with success metrics and edge cases.' },
+      { icon: Lightbulb, title: 'Analyze competitive moat', text: 'Analyze the moat and retention loops of modern AI native productivity software.' },
+      { icon: FileText, title: 'User onboarding CRO audit', text: 'Review a product signup flow to reduce time-to-value and minimize cognitive friction.' },
+      { icon: Sparkles, title: 'Prioritize feature backlog', text: 'Help me prioritize these 5 product features using RICE scoring (Reach, Impact, Confidence, Effort).' },
+    ]
+  },
+  {
+    id: 'persona-lyra',
+    name: 'Lyra',
+    badge: 'Copy & Brand Stylist',
+    tagline: 'Editorial Director & Conversion Copywriter',
+    avatar: '✍️',
+    temperature: 0.8,
+    persona: 'You are Lyra, a world-class copywriter and brand voice specialist. You craft punchy, memorable prose with distinct rhythm, zero generic corporate AI fluff, compelling headlines, and magnetic storytelling that moves people to action.',
+    systemPrompt: 'Never use generic corporate AI cliches. Use active verbs, bold hooks, and dynamic cadences.',
+    starters: [
+      { icon: Sparkles, title: 'High-converting hero headlines', text: 'Write 5 punchy, high-converting hero headlines and subheaders for our new web application.' },
+      { icon: FileText, title: 'Rewrite email with punch', text: 'Rewrite this dry email into a compelling, confident note that gets an executive response.' },
+      { icon: Lightbulb, title: 'Brand positioning manifesto', text: 'Draft a bold 3-paragraph brand manifesto that positions us against legacy incumbents.' },
+      { icon: Code2, title: 'Product launch tweet thread', text: 'Write a 6-part viral launch thread detailing the story and engineering behind our product.' },
+    ]
+  }
 ];
+const starterPrompts = BUILTIN_PERSONAS[0].starters;
 const formatMessageTime = value => value ? new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(new Date(value)) : '';
 const uid = () => crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 const copyText = async text => {
@@ -88,6 +184,260 @@ export default function App() {
   const [inChatSearchQuery, setInChatSearchQuery] = useState('');
   const [inChatSearchIndex, setInChatSearchIndex] = useState(0);
   const [prefersDark, setPrefersDark] = useState(() => window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? true);
+  const [canvasArtifact, setCanvasArtifact] = useState(null);
+  const [lastArtifact, setLastArtifact] = useState(null);
+  const [canvasViewMode, setCanvasViewMode] = useState('preview');
+  const [canvasViewport, setCanvasViewport] = useState('desktop');
+  const [canvasExpanded, setCanvasExpanded] = useState(false);
+  const [canvasWidth, setCanvasWidth] = useState(48);
+  const [isDraggingCanvas, setIsDraggingCanvas] = useState(false);
+  const [canvasRefreshKey, setCanvasRefreshKey] = useState(0);
+  const [copiedCanvas, setCopiedCanvas] = useState(false);
+
+  const [canvasPythonOutput, setCanvasPythonOutput] = useState(null);
+  const [canvasPythonRunning, setCanvasPythonRunning] = useState(false);
+
+  const [customPersonas, setCustomPersonas] = useState(() => load(PERSONA_PRESETS_KEY, []));
+  const [activePersonaId, setActivePersonaId] = useState(() => {
+    const saved = readPreferences();
+    const match = BUILTIN_PERSONAS.find(p => p.name.toLowerCase() === (saved.name || '').toLowerCase());
+    return match ? match.id : BUILTIN_PERSONAS[0].id;
+  });
+  const [personaModalOpen, setPersonaModalOpen] = useState(false);
+  const [installPrompt, setInstallPrompt] = useState(null);
+  const [isInstalled, setIsInstalled] = useState(false);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(PERSONA_PRESETS_KEY, JSON.stringify(customPersonas));
+    } catch {}
+  }, [customPersonas]);
+
+  useEffect(() => {
+    const handleBeforeInstall = e => {
+      e.preventDefault();
+      setInstallPrompt(e);
+    };
+    const handleAppInstalled = () => {
+      setInstallPrompt(null);
+      setIsInstalled(true);
+      setToast('Forma installed successfully');
+    };
+    window.addEventListener('beforeinstallprompt', handleBeforeInstall);
+    window.addEventListener('appinstalled', handleAppInstalled);
+    if (window.matchMedia?.('(display-mode: standalone)').matches || window.navigator.standalone) {
+      setIsInstalled(true);
+    }
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
+      window.removeEventListener('appinstalled', handleAppInstalled);
+    };
+  }, []);
+
+  const triggerPwaInstall = async () => {
+    if (!installPrompt) {
+      setToast('Forma can be installed directly from your browser menu');
+      return;
+    }
+    installPrompt.prompt();
+    const choice = await installPrompt.userChoice;
+    if (choice && choice.outcome === 'accepted') {
+      setInstallPrompt(null);
+      setIsInstalled(true);
+      setToast('Installing Forma...');
+    }
+  };
+
+  const selectPersona = (p) => {
+    setActivePersonaId(p.id);
+    patchSettings({
+      name: p.name,
+      persona: p.persona,
+      systemPrompt: p.systemPrompt || '',
+      temperature: typeof p.temperature === 'number' ? p.temperature : settings.temperature,
+    });
+    setToast(`Active persona: ${p.name}`);
+    setPersonaModalOpen(false);
+  };
+
+  const saveCustomPersona = (newPersona) => {
+    const personaToSave = {
+      ...newPersona,
+      id: newPersona.id || `custom-${uid()}`,
+      isCustom: true,
+    };
+    setCustomPersonas(prev => {
+      const idx = prev.findIndex(p => p.id === personaToSave.id);
+      if (idx >= 0) {
+        const copy = [...prev];
+        copy[idx] = personaToSave;
+        return copy;
+      }
+      return [personaToSave, ...prev];
+    });
+    selectPersona(personaToSave);
+  };
+
+  const deleteCustomPersona = (id) => {
+    setCustomPersonas(prev => prev.filter(p => p.id !== id));
+    if (activePersonaId === id) {
+      selectPersona(BUILTIN_PERSONAS[0]);
+    }
+    setToast('Custom persona removed');
+  };
+
+  const currentPersona = useMemo(() => {
+    return customPersonas.find(p => p.id === activePersonaId) ||
+           BUILTIN_PERSONAS.find(p => p.id === activePersonaId) ||
+           BUILTIN_PERSONAS.find(p => p.name.toLowerCase() === (settings.name || '').toLowerCase()) ||
+           BUILTIN_PERSONAS[0];
+  }, [activePersonaId, customPersonas, settings.name]);
+
+  const activeStarters = useMemo(() => {
+    return currentPersona?.starters?.length ? currentPersona.starters : BUILTIN_PERSONAS[0].starters;
+  }, [currentPersona]);
+
+  const openCanvas = (artifact) => {
+    setCanvasArtifact(artifact);
+    setLastArtifact(artifact);
+    setCanvasViewMode(artifact.viewMode || (artifact.isPreviewable ? 'preview' : 'code'));
+    setCanvasViewport(artifact.viewport || 'desktop');
+    setCanvasExpanded(false);
+    setCanvasPythonOutput(null);
+    setCanvasPythonRunning(false);
+  };
+
+  const closeCanvas = () => {
+    setCanvasArtifact(null);
+    setCanvasPythonOutput(null);
+    setCanvasPythonRunning(false);
+  };
+
+  const updateCanvasSource = (newSource) => {
+    setCanvasArtifact(prev => prev ? { ...prev, source: newSource } : null);
+    setLastArtifact(prev => prev ? { ...prev, source: newSource } : null);
+  };
+
+  const handleRunCanvasPython = async () => {
+    if (!canvasArtifact?.source || canvasPythonRunning) return;
+    setCanvasPythonRunning(true);
+    try {
+      const res = await executePythonScript(canvasArtifact.source);
+      setCanvasPythonOutput(res);
+    } catch (e) {
+      setCanvasPythonOutput({ error: e?.message || String(e), duration: 0 });
+    } finally {
+      setCanvasPythonRunning(false);
+    }
+  };
+
+  const startCanvasDrag = (e) => {
+    e.preventDefault();
+    setIsDraggingCanvas(true);
+    const startX = e.clientX;
+    const startW = canvasWidth;
+    const containerW = window.innerWidth;
+
+    const onMouseMove = (moveEvent) => {
+      const deltaX = startX - moveEvent.clientX;
+      const deltaPercent = (deltaX / containerW) * 100;
+      const newWidth = Math.min(74, Math.max(26, startW + deltaPercent));
+      setCanvasWidth(newWidth);
+    };
+
+    const onMouseUp = () => {
+      setIsDraggingCanvas(false);
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  };
+
+  const applyCanvasQuickPrompt = (promptText) => {
+    setInput(`For this ${canvasArtifact?.language || 'code'} artifact:\n${promptText}`);
+    if (window.innerWidth <= 900) {
+      setCanvasArtifact(null);
+    }
+    setTimeout(() => {
+      if (textareaRef.current) {
+        textareaRef.current.focus();
+        textareaRef.current.style.height = 'auto';
+        textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 180)}px`;
+      }
+    }, 60);
+  };
+
+  const copyCanvasCode = async () => {
+    if (!canvasArtifact?.source) return;
+    try {
+      await copyText(canvasArtifact.source);
+      setCopiedCanvas(true);
+      setTimeout(() => setCopiedCanvas(false), 1600);
+    } catch (e) {
+      console.error('Could not copy artifact code', e);
+    }
+  };
+
+  const openCanvasInNewTab = () => {
+    if (!canvasArtifact?.source) return;
+    const previewPage = buildSandboxedPreviewPage(buildHtmlPreviewDoc(canvasArtifact.source));
+    const blob = new Blob([previewPage], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank', 'noopener,noreferrer');
+    window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  };
+
+  const downloadCanvasArtifact = () => {
+    if (!canvasArtifact?.source) return;
+    const lang = (canvasArtifact.language || '').toLowerCase();
+    const isMermaid = lang === 'mermaid';
+    const extMap = {
+      html: 'html', htm: 'html', svg: 'svg', mermaid: 'mmd', javascript: 'js', js: 'js',
+      typescript: 'ts', ts: 'ts', css: 'css', json: 'json', python: 'py',
+      py: 'py', markdown: 'md', md: 'md', sh: 'sh', bash: 'sh', sql: 'sql'
+    };
+    const ext = extMap[lang] || (isMermaid ? 'mmd' : canvasArtifact.isPreviewable ? 'html' : 'txt');
+    const mime = ext === 'html' ? 'text/html' : ext === 'svg' ? 'image/svg+xml' : 'text/plain';
+    const content = canvasArtifact.isPreviewable && (lang === 'html' || lang === 'htm')
+      ? buildHtmlPreviewDoc(canvasArtifact.source)
+      : canvasArtifact.source;
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `forma-${isMermaid ? 'diagram' : (canvasArtifact.language || 'artifact').toLowerCase()}-${Date.now().toString(36)}.${ext}`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const CANVAS_QUICK_ACTIONS = [
+    { label: '+ Dark mode', prompt: 'Add a sleek dark mode toggle and refined dark theme styling.' },
+    { label: '+ Mobile responsive', prompt: 'Make this layout fully responsive across mobile, tablet, and desktop viewports.' },
+    { label: '+ Add animations', prompt: 'Add smooth CSS transitions, interactive hover states, and refined micro-animations.' },
+    { label: '+ Sample data', prompt: 'Add realistic sample datasets, search filtering, and stateful interactions.' },
+    { label: '+ Refine UI design', prompt: 'Refine the typography, contrast, spacing, and modern UI aesthetic.' }
+  ];
+
+  const MERMAID_QUICK_ACTIONS = [
+    { label: '+ Add styling & colors', prompt: 'Style this Mermaid diagram with modern colors, distinct node styles, and clear visual hierarchy.' },
+    { label: '+ Add error/fallback branch', prompt: 'Add an alternative error handling, timeout, or fallback branch to this diagram.' },
+    { label: '+ Make horizontal (LR)', prompt: 'Change this diagram flow orientation to left-to-right (graph LR).' },
+    { label: '+ Add subgraphs', prompt: 'Group related components into distinct subgraphs / logical clusters in this diagram.' },
+    { label: '+ Add explanatory notes', prompt: 'Add descriptive sequence notes or link labels explaining key interaction stages.' }
+  ];
+
+  const PYTHON_QUICK_ACTIONS = [
+    { label: '+ Plot with Matplotlib', prompt: 'Modify this Python script to generate a rich visual plot using matplotlib with clean styling, title, labels, and grid.' },
+    { label: '+ Optimize performance', prompt: 'Analyze this Python code and optimize it for speed and algorithmic efficiency with execution benchmarks.' },
+    { label: '+ Add error handling', prompt: 'Add comprehensive try/except error handling, input validation, and clear error reporting to this Python script.' },
+    { label: '+ Explain line-by-line', prompt: 'Explain how this Python script works step-by-step with key concepts and time complexity.' },
+    { label: '+ Write unit tests', prompt: 'Write comprehensive pytest unit tests covering edge cases and assertions for this script.' }
+  ];
+
   const scrollRef = useRef(null); const textareaRef = useRef(null); const fileRef = useRef(null); const libraryFileRef = useRef(null); const searchRef = useRef(null); const abortRef = useRef(null); const inChatSearchInputRef = useRef(null);
   const activeChat = chats.find(c => c.id === activeId);
   const activeLibrarySources = library.filter(source => activeChat?.librarySourceIds?.includes(source.id));
@@ -146,6 +496,7 @@ export default function App() {
         setInChatSearchOpen(false);
         setOutlineOpen(false);
         if (renamingChatId) setRenamingChatId(null);
+        setCanvasArtifact(null);
       }
     };
     window.addEventListener('keydown', onShortcut);
@@ -256,18 +607,67 @@ export default function App() {
     setChats(prev => prev.map(chat => ({ ...chat, librarySourceIds: (chat.librarySourceIds || []).filter(id => id !== sourceId) })));
     setToast('Source removed from your library');
   };
-  const send = async (override, overrideFiles, historyOverride, targetChat) => {
+  const send = async (override, overrideFiles, historyOverride, targetChat, targetAssistantIndex = null, targetVersionIndex = null) => {
     const outgoingFiles = overrideFiles ?? files;
     const text = (override ?? input).trim(); if ((!text && !outgoingFiles.length) || busy) return;
     let chat = targetChat || activeChat;
     if (!chat) { chat = newChat(); setChats(prev => [chat, ...prev]); setActiveId(chat.id); }
     const attachments = outgoingFiles.map(({ id, name, type, size, content, dataUrl, image }) => ({ id, name, type, size, content, dataUrl, image }));
     const sourceAttachments = (chat.librarySourceIds || []).map(id => library.find(source => source.id === id)).filter(Boolean);
-    const userMsg = { id: uid(), role: 'user', content: text, attachments, createdAt: Date.now() };
-    const title = chat.messages.length ? chat.title : (text.slice(0, 40) || attachments[0]?.name || 'New conversation');
-    updateChat(chat.id, c => ({ ...c, title, messages: [...c.messages, userMsg, { id: uid(), role: 'assistant', content: '', createdAt: Date.now(), streaming: true }], updatedAt: Date.now() }));
+
+    if (targetAssistantIndex === null) {
+      const userMsg = {
+        id: uid(),
+        role: 'user',
+        content: text,
+        attachments,
+        createdAt: Date.now(),
+        versions: [{ id: uid(), content: text, attachments, createdAt: Date.now() }],
+        activeVersionIndex: 0
+      };
+      const title = chat.messages.length ? chat.title : (text.slice(0, 40) || attachments[0]?.name || 'New conversation');
+      const assistantMsg = {
+        id: uid(),
+        role: 'assistant',
+        content: '',
+        createdAt: Date.now(),
+        streaming: true,
+        versions: [{ id: uid(), content: '', createdAt: Date.now() }],
+        activeVersionIndex: 0
+      };
+      updateChat(chat.id, c => ({ ...c, title, messages: [...c.messages, userMsg, assistantMsg], updatedAt: Date.now() }));
+    }
+
     setInput(''); setFiles([]); setBusy(true);
     const controller = new AbortController(); abortRef.current = controller;
+
+    const updateStreamingMessage = (c, answerChunk, isDone = false, errorText = null) => {
+      const targetIdx = targetAssistantIndex !== null ? targetAssistantIndex : (c.messages.length - 1);
+      return {
+        ...c,
+        messages: c.messages.map((m, i) => {
+          if (i !== targetIdx) return m;
+          let versions = m.versions && m.versions.length > 0 ? [...m.versions] : [{ id: m.id, content: m.content, createdAt: m.createdAt }];
+          const vIdx = targetVersionIndex !== null ? targetVersionIndex : (m.activeVersionIndex ?? (versions.length - 1));
+          if (versions[vIdx]) {
+            versions[vIdx] = {
+              ...versions[vIdx],
+              content: errorText ? versions[vIdx].content : answerChunk,
+            };
+          }
+          return {
+            ...m,
+            content: errorText ? '' : (answerChunk || (isDone ? 'I didn’t receive a text response. Please try again.' : '')),
+            streaming: !isDone && !errorText,
+            error: errorText || null,
+            versions,
+            activeVersionIndex: vIdx,
+          };
+        }),
+        updatedAt: Date.now()
+      };
+    };
+
     try {
       if (activeProvider?.enabled === false) throw new Error('Enable this provider in Model settings before using it.');
       if (!activeProvider?.baseUrl?.trim() || !activeProvider?.model?.trim()) throw new Error('Add a base URL and enabled model in Model settings for this provider.');
@@ -289,7 +689,6 @@ export default function App() {
         res = await fetch(endpoint, { method: 'POST', signal: controller.signal, headers: requestHeaders, body: JSON.stringify(payload) });
       } catch (directErr) {
         if (directErr.name === 'AbortError') throw directErr;
-        // Direct browser fetch failed (e.g. provider CORS restriction on deployed domain). Seamlessly retry via /api/proxy
         try {
           res = await fetch('/api/proxy', {
             method: 'POST',
@@ -317,13 +716,13 @@ export default function App() {
         const { value, done } = await reader.read(); if (done) break;
         buffer += decoder.decode(value, { stream: true }); const lines = buffer.split('\n'); buffer = lines.pop() || '';
         for (const line of lines) { const l = line.trim(); if (!l.startsWith('data:')) continue; const data = l.slice(5).trim(); if (data === '[DONE]') continue;
-          try { const event = JSON.parse(data); const delta = event.choices?.[0]?.delta?.content; if (typeof delta === 'string') { answer += delta; updateChat(chat.id, c => ({ ...c, messages: c.messages.map((m, i) => i === c.messages.length - 1 ? { ...m, content: answer } : m), updatedAt: Date.now() })); } else if (Array.isArray(delta)) { const d = delta.map(x => x.text || '').join(''); answer += d; updateChat(chat.id, c => ({ ...c, messages: c.messages.map((m, i) => i === c.messages.length - 1 ? { ...m, content: answer } : m), updatedAt: Date.now() })); } } catch {}
+          try { const event = JSON.parse(data); const delta = event.choices?.[0]?.delta?.content; if (typeof delta === 'string') { answer += delta; updateChat(chat.id, c => updateStreamingMessage(c, answer, false)); } else if (Array.isArray(delta)) { const d = delta.map(x => x.text || '').join(''); answer += d; updateChat(chat.id, c => updateStreamingMessage(c, answer, false)); } } catch {}
         }
       }
-      updateChat(chat.id, c => ({ ...c, messages: c.messages.map((m, i) => i === c.messages.length - 1 ? { ...m, streaming: false, content: answer || 'I didn’t receive a text response. Please try again.' } : m), updatedAt: Date.now() }));
+      updateChat(chat.id, c => updateStreamingMessage(c, answer, true));
     } catch (err) {
-      if (err.name !== 'AbortError') { updateChat(chat.id, c => ({ ...c, messages: c.messages.map((m, i) => i === c.messages.length - 1 ? { ...m, streaming: false, error: err.message, content: '' } : m), updatedAt: Date.now() })); }
-      else updateChat(chat.id, c => ({ ...c, messages: c.messages.filter(m => !m.streaming), updatedAt: Date.now() }));
+      if (err.name !== 'AbortError') { updateChat(chat.id, c => updateStreamingMessage(c, '', true, err.message)); }
+      else updateChat(chat.id, c => ({ ...c, messages: c.messages.map(m => m.streaming ? { ...m, streaming: false } : m), updatedAt: Date.now() }));
     } finally { setBusy(false); abortRef.current = null; }
   };
   const createBranch = (messages, title = activeChat?.title) => {
@@ -331,20 +730,135 @@ export default function App() {
     setChats(list => [branch, ...list]); setActiveId(branch.id); setMobileSidebar(false);
     return branch;
   };
+  const switchMessageVersion = (targetMessage, newIndex) => {
+    if (!activeChat || !targetMessage.versions || newIndex < 0 || newIndex >= targetMessage.versions.length) return;
+    const selected = targetMessage.versions[newIndex];
+    const msgIndex = activeChat.messages.findIndex(m => m.id === targetMessage.id);
+    if (msgIndex < 0) return;
+
+    const nextMsg = activeChat.messages[msgIndex + 1];
+    const hasPairedAssistantVersion = targetMessage.role === 'user' && nextMsg && nextMsg.role === 'assistant' && nextMsg.versions && nextMsg.versions[newIndex];
+
+    updateChat(activeId, c => ({
+      ...c,
+      messages: c.messages.map((m, i) => {
+        if (i === msgIndex) {
+          return {
+            ...m,
+            activeVersionIndex: newIndex,
+            content: selected.content,
+            attachments: selected.attachments || m.attachments,
+            createdAt: selected.createdAt || m.createdAt,
+          };
+        }
+        if (hasPairedAssistantVersion && i === msgIndex + 1) {
+          const paired = nextMsg.versions[newIndex];
+          return {
+            ...m,
+            activeVersionIndex: newIndex,
+            content: paired.content,
+            createdAt: paired.createdAt || m.createdAt,
+          };
+        }
+        return m;
+      })
+    }));
+  };
   const editAndResend = (message, text) => {
     if (busy || !activeChat) return;
     const index = activeChat.messages.findIndex(m => m.id === message.id); if (index < 0) return;
+
+    const existingUserVersions = message.versions && message.versions.length > 0
+      ? message.versions
+      : [{ id: message.id, content: message.content, attachments: message.attachments || [], createdAt: message.createdAt || Date.now() }];
+    const newUserVersion = { id: uid(), content: text, attachments: message.attachments || [], createdAt: Date.now() };
+    const updatedUserVersions = [...existingUserVersions, newUserVersion];
+    const newUserVersionIndex = updatedUserVersions.length - 1;
+
+    const nextMsg = activeChat.messages[index + 1];
+    const assistantIndex = (nextMsg && nextMsg.role === 'assistant') ? index + 1 : -1;
     const history = activeChat.messages.slice(0, index).filter(m => !m.streaming);
-    const branch = createBranch(history);
-    send(text, message.attachments || [], history, branch);
+
+    if (assistantIndex !== -1) {
+      const existingAssistantVersions = nextMsg.versions && nextMsg.versions.length > 0
+        ? nextMsg.versions
+        : [{ id: nextMsg.id, content: nextMsg.content, createdAt: nextMsg.createdAt || Date.now() }];
+      const newAssistantVersion = { id: uid(), content: '', createdAt: Date.now() };
+      const updatedAssistantVersions = [...existingAssistantVersions, newAssistantVersion];
+      const newAssistantVersionIndex = updatedAssistantVersions.length - 1;
+
+      updateChat(activeId, c => ({
+        ...c,
+        messages: c.messages.map((m, i) => {
+          if (i === index) {
+            return {
+              ...m,
+              content: text,
+              versions: updatedUserVersions,
+              activeVersionIndex: newUserVersionIndex,
+              createdAt: Date.now()
+            };
+          }
+          if (i === assistantIndex) {
+            return {
+              ...m,
+              content: '',
+              streaming: true,
+              error: null,
+              versions: updatedAssistantVersions,
+              activeVersionIndex: newAssistantVersionIndex,
+              createdAt: Date.now()
+            };
+          }
+          return m;
+        }),
+        updatedAt: Date.now()
+      }));
+
+      send(text, message.attachments || [], history, activeChat, assistantIndex, newAssistantVersionIndex);
+    } else {
+      updateChat(activeId, c => ({
+        ...c,
+        messages: c.messages.map((m, i) => i === index ? {
+          ...m,
+          content: text,
+          versions: updatedUserVersions,
+          activeVersionIndex: newUserVersionIndex,
+          createdAt: Date.now()
+        } : m),
+        updatedAt: Date.now()
+      }));
+      send(text, message.attachments || [], history, activeChat);
+    }
   };
   const regenerateFrom = message => {
     if (busy || !activeChat) return;
     const index = activeChat.messages.findIndex(m => m.id === message.id); if (index < 0) return;
     const userIndex = activeChat.messages.slice(0, index).map(m => m.role).lastIndexOf('user'); if (userIndex < 0) return;
     const userMessage = activeChat.messages[userIndex]; const history = activeChat.messages.slice(0, userIndex).filter(m => !m.streaming);
-    const branch = createBranch(history);
-    send(userMessage.content || '', userMessage.attachments || [], history, branch);
+
+    const existingVersions = message.versions && message.versions.length > 0
+      ? message.versions
+      : [{ id: message.id, content: message.content, createdAt: message.createdAt || Date.now() }];
+
+    const newVersionIndex = existingVersions.length;
+    const newVersion = { id: uid(), content: '', createdAt: Date.now() };
+    const updatedVersions = [...existingVersions, newVersion];
+
+    updateChat(activeId, c => ({
+      ...c,
+      messages: c.messages.map((m, i) => i === index ? {
+        ...m,
+        content: '',
+        streaming: true,
+        error: null,
+        versions: updatedVersions,
+        activeVersionIndex: newVersionIndex,
+      } : m),
+      updatedAt: Date.now()
+    }));
+
+    send(userMessage.content || '', userMessage.attachments || [], history, activeChat, index, newVersionIndex);
   };
   const branchFromMessage = message => {
     if (busy || !activeChat) return;
@@ -379,10 +893,12 @@ export default function App() {
   if (!showArchived) regularChats.forEach(c => { const d = new Date(c.updatedAt || Date.now()).setHours(0,0,0,0); const day = (today - d) / 86400000; (day < 1 ? groups.Today : day < 7 ? groups['Previous 7 days'] : groups.Older).push(c); });
   const archivedCount = chats.filter(c => c.archived).length;
 
-  return <div className="app-shell" data-theme={appTheme}>
+  return (
+    <CanvasContext.Provider value={{ canvasArtifact, openCanvas, closeCanvas, updateCanvasSource, canvasExpanded, setCanvasExpanded, theme: appTheme }}>
+      <div className="app-shell" data-theme={appTheme}>
     <aside className={`sidebar ${sidebarOpen ? 'sidebar-open' : 'sidebar-closed'} ${mobileSidebar ? 'mobile-visible' : ''}`}>
       <div className="sidebar-top">
-        <a className="brand" href="#" onClick={e => e.preventDefault()}><span className="brand-mark"><MessageSquare size={15}/></span>{sidebarOpen && <span>forma<span className="brand-period">.</span></span>}</a>
+        <a className="brand" href="#" onClick={e => e.preventDefault()}><span className="brand-mark"><img src="/icon.svg" alt="Forma" className="brand-mark-img" /></span>{sidebarOpen && <span>forma<span className="brand-period">.</span></span>}</a>
         {mobileSidebar ? (
           <button className="icon-btn mobile-sidebar-close" aria-label="Close navigation" onClick={() => setMobileSidebar(false)}><X size={18}/></button>
         ) : (
@@ -411,6 +927,25 @@ export default function App() {
           <span className="provider-status"><span className={`status-dot ${activeProviderConfigured ? 'status-on' : ''}`}></span>{activeProviderConfigured ? 'Configured' : 'Setup provider'}</span>
         </div>
         <div className="top-actions">
+          {canvasArtifact ? (
+            <button
+              className="icon-btn canvas-topbar-pill icon-btn-active"
+              title="Artifact Canvas is open. Click to minimize."
+              aria-label="Toggle Canvas"
+              onClick={() => setCanvasArtifact(null)}
+            >
+              <Columns2 size={17} />
+            </button>
+          ) : lastArtifact ? (
+            <button
+              className="icon-btn canvas-topbar-pill"
+              title={`Reopen "${lastArtifact.title}" in Canvas`}
+              aria-label="Reopen Canvas"
+              onClick={() => openCanvas(lastArtifact)}
+            >
+              <Columns2 size={17} />
+            </button>
+          ) : null}
           {activeChat?.messages?.length > 0 && (
             <>
               <button
@@ -436,296 +971,604 @@ export default function App() {
               </button>
             </>
           )}
+          {installPrompt && (
+            <button
+              className="pwa-topbar-install-btn"
+              title="Install Forma as desktop/mobile app"
+              onClick={triggerPwaInstall}
+            >
+              <Download size={14}/>
+              <span className="pwa-btn-label">Install App</span>
+            </button>
+          )}
+          <button className="icon-btn persona-trigger" title="Persona & Template Library" onClick={() => setPersonaModalOpen(true)}><Sparkles size={17}/></button>
           <button className="icon-btn knowledge-trigger" title="Knowledge Library" onClick={() => setLibraryOpen(true)}><FileText size={17}/></button>
           <button className="icon-btn top-export" title="Export chats" onClick={exportChats}><Download size={17}/></button>
           <button className="icon-btn settings-trigger" onClick={() => { setEditingProviderId(activeProviderId); setSettingsTab('connection'); setSettingsOpen(true); }} title="Model settings"><Settings2 size={18}/></button>
         </div>
       </header>
 
-      {inChatSearchOpen && (
-        <div className="inchat-search-bar" role="search">
-          <Search size={15} className="inchat-search-icon" />
-          <input
-            ref={inChatSearchInputRef}
-            autoFocus
-            placeholder="Search in this chat…"
-            value={inChatSearchQuery}
-            onChange={e => { setInChatSearchQuery(e.target.value); setInChatSearchIndex(0); }}
-            onKeyDown={e => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                jumpToSearchMatch(e.shiftKey ? -1 : 1);
-              } else if (e.key === 'Escape') {
-                setInChatSearchOpen(false);
-              }
-            }}
-          />
-          <span className="inchat-search-count">
-            {inChatSearchQuery.trim()
-              ? matchingMessages.length
-                ? `${inChatSearchIndex + 1} of ${matchingMessages.length}`
-                : 'No matches'
-              : 'Type to find'}
-          </span>
-          <button
-            className="icon-btn mini"
-            title="Previous match (Shift+Enter)"
-            disabled={matchingMessages.length <= 1}
-            onClick={() => jumpToSearchMatch(-1)}
-          >
-            <ChevronUp size={14} />
-          </button>
-          <button
-            className="icon-btn mini"
-            title="Next match (Enter)"
-            disabled={matchingMessages.length <= 1}
-            onClick={() => jumpToSearchMatch(1)}
-          >
-            <ChevronDown size={14} />
-          </button>
-          <button
-            className="icon-btn mini"
-            title="Close search"
-            onClick={() => setInChatSearchOpen(false)}
-          >
-            <X size={14} />
-          </button>
-        </div>
-      )}
-
-      <div className="conversation-layout">
-        <div className={`conversation ${activeChat?.messages?.length ? 'conversation-active' : ''}`} ref={scrollRef} onScroll={syncActiveMarker}>
-          {!activeChat?.messages?.length ? (
-            <div className="welcome-wrap">
-              <div className="welcome-content">
-                <h1>What can I help with?</h1>
-                <p className="welcome-desc">Ask a question, or add a file to get started.</p>
-                <div className="prompt-grid">
-                  {starterPrompts.map(({icon: Icon,title,text}) => (
-                    <button className="prompt-card" key={title} onClick={() => { setInput(text); textareaRef.current?.focus(); }}>
-                      <span className="prompt-icon"><Icon size={17}/></span>
-                      <span className="prompt-title">{title}</span>
-                      <span className="prompt-text">{text}</span>
-                      <ArrowUp className="prompt-arrow" size={14}/>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="messages-wrap">
-              {activeChat.messages.map((m, i) => (
-                <Message
-                  key={m.id}
-                  message={m}
-                  assistantName={settings.name || 'Assistant'}
-                  isLast={i === activeChat.messages.length - 1}
-                  busy={busy}
-                  onEditSubmit={editAndResend}
-                  onBranch={branchFromMessage}
-                  onRegenerate={regenerateFrom}
-                  onToggleBookmark={() => toggleMessageBookmark(m.id)}
-                  onRetry={() => {
-                    const lastUserIndex = activeChat.messages.map(x => x.role).lastIndexOf('user');
-                    if (lastUserIndex < 0) return;
-                    const lastUser = activeChat.messages[lastUserIndex];
-                    const history = activeChat.messages.slice(0, lastUserIndex);
-                    updateChat(activeId, c => ({ ...c, messages: history }));
-                    send(lastUser.content || '', lastUser.attachments || [], history);
-                  }}
-                />
-              ))}
+      <div className={`workspace-split-container ${canvasArtifact ? 'has-canvas' : ''} ${canvasExpanded ? 'canvas-is-maximized' : ''}`}>
+        <div className="chat-column">
+          {inChatSearchOpen && (
+            <div className="inchat-search-bar" role="search">
+              <Search size={15} className="inchat-search-icon" />
+              <input
+                ref={inChatSearchInputRef}
+                autoFocus
+                placeholder="Search in this chat…"
+                value={inChatSearchQuery}
+                onChange={e => { setInChatSearchQuery(e.target.value); setInChatSearchIndex(0); }}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    jumpToSearchMatch(e.shiftKey ? -1 : 1);
+                  } else if (e.key === 'Escape') {
+                    setInChatSearchOpen(false);
+                  }
+                }}
+              />
+              <span className="inchat-search-count">
+                {inChatSearchQuery.trim()
+                  ? matchingMessages.length
+                    ? `${inChatSearchIndex + 1} of ${matchingMessages.length}`
+                    : 'No matches'
+                  : 'Type to find'}
+              </span>
+              <button
+                className="icon-btn mini"
+                title="Previous match (Shift+Enter)"
+                disabled={matchingMessages.length <= 1}
+                onClick={() => jumpToSearchMatch(-1)}
+              >
+                <ChevronUp size={14} />
+              </button>
+              <button
+                className="icon-btn mini"
+                title="Next match (Enter)"
+                disabled={matchingMessages.length <= 1}
+                onClick={() => jumpToSearchMatch(1)}
+              >
+                <ChevronDown size={14} />
+              </button>
+              <button
+                className="icon-btn mini"
+                title="Close search"
+                onClick={() => setInChatSearchOpen(false)}
+              >
+                <X size={14} />
+              </button>
             </div>
           )}
-        </div>
 
-        {/* Floating scroll to bottom button */}
-        {showScrollBottom && (
-          <button
-            className={`inchat-scroll-bottom ${busy ? 'inchat-scroll-bottom-busy' : ''}`}
-            onClick={scrollToBottom}
-            title="Scroll to latest message"
-            aria-label="Scroll to bottom"
-          >
-            <ArrowDown size={16} />
-            {busy && <span className="inchat-scroll-pulse" />}
-          </button>
-        )}
-
-        {/* In-Chat Outline Panel (ChatGPT-style Table of Contents) */}
-        {outlineOpen && userMessages.length > 0 && (
-          <>
-            <div className="inchat-outline-backdrop" onClick={() => setOutlineOpen(false)} aria-label="Close outline" />
-            <aside className="inchat-outline-panel" aria-label="Conversation outline">
-              <div className="inchat-outline-head">
-                <div className="inchat-outline-title">
-                  <Compass size={15} />
-                  <span>Outline</span>
-                  <small>{userMessages.length}</small>
-                </div>
-                <button className="icon-btn mini" onClick={() => setOutlineOpen(false)} title="Close outline">
-                  <X size={14} />
-                </button>
-              </div>
-              <div className="inchat-outline-filter">
-                <button
-                  className={outlineFilter === 'all' ? 'active' : ''}
-                  onClick={() => setOutlineFilter('all')}
-                >
-                  All turns ({userMessages.length})
-                </button>
-                <button
-                  className={outlineFilter === 'bookmarked' ? 'active' : ''}
-                  onClick={() => setOutlineFilter('bookmarked')}
-                >
-                  Saved ({userMessages.filter(m => m.bookmarked).length})
-                </button>
-              </div>
-              <div className="inchat-outline-list">
-                {userMessages
-                  .filter(m => outlineFilter === 'all' || m.bookmarked)
-                  .map((m) => {
-                    const actualIndex = userMessages.indexOf(m);
-                    const question = (m.content || m.attachments?.map(f => f.name).join(', ') || 'File attachment').trim();
-                    const isActive = activeMarkerId === m.id;
-                    return (
-                      <div
-                        key={m.id}
-                        className={`inchat-outline-item ${isActive ? 'inchat-outline-active' : ''}`}
-                        onClick={() => {
-                          jumpToMessage(m.id);
-                          if (window.innerWidth <= 768) setOutlineOpen(false);
-                        }}
-                      >
-                      <span className="inchat-outline-num">#{actualIndex + 1}</span>
-                      <span className="inchat-outline-text" title={question}>{question}</span>
-                      <button
-                        className={`inchat-outline-bm ${m.bookmarked ? 'is-bookmarked' : ''}`}
-                        title={m.bookmarked ? 'Remove bookmark' : 'Bookmark turn'}
-                        onClick={(e) => toggleMessageBookmark(m.id, e)}
-                      >
-                        <Bookmark size={13} fill={m.bookmarked ? 'currentColor' : 'none'} />
-                      </button>
-                    </div>
-                  );
-                })}
-              {outlineFilter === 'bookmarked' && userMessages.filter(m => m.bookmarked).length === 0 && (
-                <div className="inchat-outline-empty">No bookmarked turns yet. Click the bookmark icon on any message to save it here.</div>
-              )}
-            </div>
-          </aside>
-        </>
-      )}
-
-        {/* The Polished Timeline Scrubber & Hover Card matching Image 1 & Image 2 */}
-        {userMessages.length > 0 && (
-          <div className="message-nav-wrapper">
-            <button
-              className={`message-nav-outline-toggle ${outlineOpen ? 'active' : ''}`}
-              onClick={() => setOutlineOpen(v => !v)}
-              title={outlineOpen ? 'Hide outline' : 'Show conversation outline'}
-              aria-label="Conversation outline"
-            >
-              <Compass size={14} />
-            </button>
-
-            <nav
-              className="message-nav-rail"
-              aria-label="Jump to a message in this chat"
-              style={{
-                height: `clamp(110px, calc(${userMessages.length} * 38px + 30px), min(55vh, 440px))`
-              }}
-            >
-              <div className="message-nav-track-line" />
-              {userMessages.map((m, index) => {
-                const messageIndex = activeChat.messages.indexOf(m);
-                const answer = activeChat.messages.slice(messageIndex + 1).find(x => x.role === 'assistant');
-                const question = (m.content || m.attachments?.map(f => f.name).join(', ') || 'File attachment').trim();
-                const preview = answer?.content
-                  ? answer.content.slice(0, 240)
-                  : (answer?.error ? 'Response error' : answer?.streaming ? 'Generating response…' : 'No response yet');
-                const isBookmarked = Boolean(m.bookmarked);
-                const hasFiles = Boolean(m.attachments?.length);
-                const isActive = activeMarkerId === m.id;
-
-                return (
-                  <div
-                    className={`message-nav-item ${isActive ? 'message-nav-item-active' : ''} ${isBookmarked ? 'message-nav-item-bookmarked' : ''} ${hoveredMarkerId === m.id ? 'message-nav-item-hovered' : ''}`}
-                    key={m.id}
-                    style={{ top: `${((index + 0.5) / userMessages.length) * 100}%` }}
-                    onMouseEnter={() => setHoveredMarkerId(m.id)}
-                    onMouseLeave={() => setHoveredMarkerId(null)}
-                  >
-                    <button
-                      className="message-nav-marker-btn"
-                      aria-label={`Jump to turn ${index + 1}: ${question.slice(0, 40)}`}
-                      onClick={() => jumpToMessage(m.id)}
-                      onMouseEnter={() => setHoveredMarkerId(m.id)}
-                      onFocus={() => setHoveredMarkerId(m.id)}
-                      onBlur={() => setHoveredMarkerId(null)}
-                    >
-                      <span className="message-nav-tick-bar" />
-                    </button>
-
-                    {/* Popover card matching Image 1 */}
+          <div className="conversation-layout">
+            <div className={`conversation ${activeChat?.messages?.length ? 'conversation-active' : ''}`} ref={scrollRef} onScroll={syncActiveMarker}>
+              {!activeChat?.messages?.length ? (
+                <div className="welcome-wrap">
+                  <div className="welcome-content">
                     <div
-                      className="message-nav-card"
-                      onClick={() => jumpToMessage(m.id)}
-                      onMouseEnter={() => setHoveredMarkerId(m.id)}
-                      onMouseLeave={() => setHoveredMarkerId(null)}
+                      className="welcome-persona-badge"
+                      onClick={() => setPersonaModalOpen(true)}
+                      role="button"
+                      tabIndex={0}
+                      title="Switch AI persona preset & templates"
+                      onKeyDown={e => { if (e.key === 'Enter') setPersonaModalOpen(true); }}
                     >
-                      {hasFiles && (
-                        <div className="message-nav-card-filetag">
-                          <Paperclip size={11} />
-                          <span>{m.attachments.map(f => f.name).join(', ')}</span>
-                        </div>
-                      )}
-                      <div className="message-nav-card-head">
-                        <div className="message-nav-card-title-group">
-                          <span className="message-nav-card-turn">Turn {index + 1}</span>
-                          <h4 className="message-nav-card-title" title={question}>{question}</h4>
-                        </div>
-                        <button
-                          className={`message-nav-card-bookmark ${isBookmarked ? 'is-bookmarked' : ''}`}
-                          title={isBookmarked ? 'Remove bookmark' : 'Bookmark this turn'}
-                          aria-label={isBookmarked ? 'Remove bookmark' : 'Bookmark this turn'}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            toggleMessageBookmark(m.id, e);
-                          }}
-                        >
-                          <Bookmark size={14} fill={isBookmarked ? 'currentColor' : 'none'} />
+                      <span className="persona-badge-avatar">{currentPersona.avatar}</span>
+                      <span className="persona-badge-info">
+                        <span className="persona-badge-name">{settings.name || currentPersona.name}</span>
+                        <span className="persona-badge-role">{currentPersona.badge || 'Assistant'}</span>
+                      </span>
+                      <span className="persona-badge-action">
+                        <span>Switch Persona</span>
+                        <ChevronRight size={13} />
+                      </span>
+                    </div>
+
+                    <h1>What can I help with?</h1>
+                    <p className="welcome-desc">Ask anything, run Python code, or customize your persona.</p>
+                    <div className="prompt-grid">
+                      {activeStarters.map(({icon: Icon,title,text}) => (
+                        <button className="prompt-card" key={title} onClick={() => { setInput(text); textareaRef.current?.focus(); }}>
+                          <div className="prompt-card-top">
+                            <span className="prompt-title">{title}</span>
+                            <span className="prompt-icon"><Icon size={16}/></span>
+                          </div>
+                          <span className="prompt-text">{text}</span>
+                          <ArrowUp className="prompt-arrow" size={14}/>
                         </button>
-                      </div>
-
-                      <p className="message-nav-card-body">
-                        {preview}
-                      </p>
-
-                      <div className="message-nav-card-foot">
-                        <span className="message-nav-card-meta">
-                          {answer?.streaming ? (
-                            <span className="meta-streaming"><LoaderCircle size={11} className="spin" /> Generating…</span>
-                          ) : answer?.error ? (
-                            <span className="meta-error"><AlertCircle size={11} /> Error</span>
-                          ) : (
-                            formatMessageTime(m.createdAt) || `Turn ${index + 1}`
-                          )}
-                        </span>
-                        <span className="message-nav-card-jump">
-                          Jump to turn <ChevronRight size={12} />
-                        </span>
-                      </div>
+                      ))}
                     </div>
                   </div>
-                );
-              })}
-            </nav>
+                </div>
+              ) : (
+                <div className="messages-wrap">
+                  {activeChat.messages.map((m, i) => (
+                    <Message
+                      key={m.id}
+                      message={m}
+                      assistantName={settings.name || 'Assistant'}
+                      isLast={i === activeChat.messages.length - 1}
+                      busy={busy}
+                      onEditSubmit={editAndResend}
+                      onBranch={branchFromMessage}
+                      onRegenerate={regenerateFrom}
+                      onSwitchVersion={switchMessageVersion}
+                      onToggleBookmark={() => toggleMessageBookmark(m.id)}
+                      onRetry={() => {
+                        const lastUserIndex = activeChat.messages.map(x => x.role).lastIndexOf('user');
+                        if (lastUserIndex < 0) return;
+                        const lastUser = activeChat.messages[lastUserIndex];
+                        const history = activeChat.messages.slice(0, lastUserIndex);
+                        updateChat(activeId, c => ({ ...c, messages: history }));
+                        send(lastUser.content || '', lastUser.attachments || [], history);
+                      }}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Floating scroll to bottom button */}
+            {showScrollBottom && (
+              <button
+                className={`inchat-scroll-bottom ${busy ? 'inchat-scroll-bottom-busy' : ''}`}
+                onClick={scrollToBottom}
+                title="Scroll to latest message"
+                aria-label="Scroll to bottom"
+              >
+                <ArrowDown size={16} />
+                {busy && <span className="inchat-scroll-pulse" />}
+              </button>
+            )}
+
+            {/* In-Chat Outline Panel (ChatGPT-style Table of Contents) */}
+            {outlineOpen && userMessages.length > 0 && (
+              <>
+                <div className="inchat-outline-backdrop" onClick={() => setOutlineOpen(false)} aria-label="Close outline" />
+                <aside className="inchat-outline-panel" aria-label="Conversation outline">
+                  <div className="inchat-outline-head">
+                    <div className="inchat-outline-title">
+                      <Compass size={15} />
+                      <span>Outline</span>
+                      <small>{userMessages.length}</small>
+                    </div>
+                    <button className="icon-btn mini" onClick={() => setOutlineOpen(false)} title="Close outline">
+                      <X size={14} />
+                    </button>
+                  </div>
+                  <div className="inchat-outline-filter">
+                    <button
+                      className={outlineFilter === 'all' ? 'active' : ''}
+                      onClick={() => setOutlineFilter('all')}
+                    >
+                      All turns ({userMessages.length})
+                    </button>
+                    <button
+                      className={outlineFilter === 'bookmarked' ? 'active' : ''}
+                      onClick={() => setOutlineFilter('bookmarked')}
+                    >
+                      Saved ({userMessages.filter(m => m.bookmarked).length})
+                    </button>
+                  </div>
+                  <div className="inchat-outline-list">
+                    {userMessages
+                      .filter(m => outlineFilter === 'all' || m.bookmarked)
+                      .map((m) => {
+                        const actualIndex = userMessages.indexOf(m);
+                        const question = (m.content || m.attachments?.map(f => f.name).join(', ') || 'File attachment').trim();
+                        const isActive = activeMarkerId === m.id;
+                        return (
+                          <div
+                            key={m.id}
+                            className={`inchat-outline-item ${isActive ? 'inchat-outline-active' : ''}`}
+                            onClick={() => {
+                              jumpToMessage(m.id);
+                              if (window.innerWidth <= 768) setOutlineOpen(false);
+                            }}
+                          >
+                          <span className="inchat-outline-num">#{actualIndex + 1}</span>
+                          <span className="inchat-outline-text" title={question}>{question}</span>
+                          <button
+                            className={`inchat-outline-bm ${m.bookmarked ? 'is-bookmarked' : ''}`}
+                            title={m.bookmarked ? 'Remove bookmark' : 'Bookmark turn'}
+                            onClick={(e) => toggleMessageBookmark(m.id, e)}
+                          >
+                            <Bookmark size={13} fill={m.bookmarked ? 'currentColor' : 'none'} />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  {outlineFilter === 'bookmarked' && userMessages.filter(m => m.bookmarked).length === 0 && (
+                    <div className="inchat-outline-empty">No bookmarked turns yet. Click the bookmark icon on any message to save it here.</div>
+                  )}
+                </div>
+              </aside>
+            </>
+          )}
+
+            {/* The Polished Timeline Scrubber & Hover Card matching Image 1 & Image 2 */}
+            {userMessages.length > 0 && (
+              <div className="message-nav-wrapper">
+                <button
+                  className={`message-nav-outline-toggle ${outlineOpen ? 'active' : ''}`}
+                  onClick={() => setOutlineOpen(v => !v)}
+                  title={outlineOpen ? 'Hide outline' : 'Show conversation outline'}
+                  aria-label="Conversation outline"
+                >
+                  <Compass size={14} />
+                </button>
+
+                <nav
+                  className="message-nav-rail"
+                  aria-label="Jump to a message in this chat"
+                  style={{
+                    height: `clamp(110px, calc(${userMessages.length} * 38px + 30px), min(55vh, 440px))`
+                  }}
+                >
+                  <div className="message-nav-track-line" />
+                  {userMessages.map((m, index) => {
+                    const messageIndex = activeChat.messages.indexOf(m);
+                    const answer = activeChat.messages.slice(messageIndex + 1).find(x => x.role === 'assistant');
+                    const question = (m.content || m.attachments?.map(f => f.name).join(', ') || 'File attachment').trim();
+                    const preview = answer?.content
+                      ? answer.content.slice(0, 240)
+                      : (answer?.error ? 'Response error' : answer?.streaming ? 'Generating response…' : 'No response yet');
+                    const isBookmarked = Boolean(m.bookmarked);
+                    const hasFiles = Boolean(m.attachments?.length);
+                    const isActive = activeMarkerId === m.id;
+
+                    return (
+                      <div
+                        className={`message-nav-item ${isActive ? 'message-nav-item-active' : ''} ${isBookmarked ? 'message-nav-item-bookmarked' : ''} ${hoveredMarkerId === m.id ? 'message-nav-item-hovered' : ''}`}
+                        key={m.id}
+                        style={{ top: `${((index + 0.5) / userMessages.length) * 100}%` }}
+                        onMouseEnter={() => setHoveredMarkerId(m.id)}
+                        onMouseLeave={() => setHoveredMarkerId(null)}
+                      >
+                        <button
+                          className="message-nav-marker-btn"
+                          aria-label={`Jump to turn ${index + 1}: ${question.slice(0, 40)}`}
+                          onClick={() => jumpToMessage(m.id)}
+                          onMouseEnter={() => setHoveredMarkerId(m.id)}
+                          onFocus={() => setHoveredMarkerId(m.id)}
+                          onBlur={() => setHoveredMarkerId(null)}
+                        >
+                          <span className="message-nav-tick-bar" />
+                        </button>
+
+                        <div
+                          className="message-nav-card"
+                          onClick={() => jumpToMessage(m.id)}
+                          onMouseEnter={() => setHoveredMarkerId(m.id)}
+                          onMouseLeave={() => setHoveredMarkerId(null)}
+                        >
+                          {hasFiles && (
+                            <div className="message-nav-card-filetag">
+                              <Paperclip size={11} />
+                              <span>{m.attachments.map(f => f.name).join(', ')}</span>
+                            </div>
+                          )}
+                          <div className="message-nav-card-head">
+                            <div className="message-nav-card-title-group">
+                              <span className="message-nav-card-turn">Turn {index + 1}</span>
+                              <h4 className="message-nav-card-title" title={question}>{question}</h4>
+                            </div>
+                            <button
+                              className={`message-nav-card-bookmark ${isBookmarked ? 'is-bookmarked' : ''}`}
+                              title={isBookmarked ? 'Remove bookmark' : 'Bookmark this turn'}
+                              aria-label={isBookmarked ? 'Remove bookmark' : 'Bookmark this turn'}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleMessageBookmark(m.id, e);
+                              }}
+                            >
+                              <Bookmark size={14} fill={isBookmarked ? 'currentColor' : 'none'} />
+                            </button>
+                          </div>
+
+                          <p className="message-nav-card-body">
+                            {preview}
+                          </p>
+
+                          <div className="message-nav-card-foot">
+                            <span className="message-nav-card-meta">
+                              {answer?.streaming ? (
+                                <span className="meta-streaming"><LoaderCircle size={11} className="spin" /> Generating…</span>
+                              ) : answer?.error ? (
+                                <span className="meta-error"><AlertCircle size={11} /> Error</span>
+                              ) : (
+                                formatMessageTime(m.createdAt) || `Turn ${index + 1}`
+                              )}
+                            </span>
+                            <span className="message-nav-card-jump">
+                              Jump to turn <ChevronRight size={12} />
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </nav>
+              </div>
+            )}
           </div>
+          <div className="composer-area"><div className="composer-wrap"><div className="file-previews">{files.map(f => { const Icon = fileIcon(f.type); return <div className="file-chip" key={f.id}>{f.image && f.dataUrl ? <img src={f.dataUrl} alt=""/> : <span className="file-chip-icon"><Icon size={15}/></span>}<span className="file-chip-text"><b>{f.name}</b><small>{formatSize(f.size)}</small></span><button onClick={() => setFiles(v => v.filter(x => x.id !== f.id))}><X size={13}/></button></div>; })}</div>
+            <div className="composer"><textarea ref={textareaRef} rows="1" placeholder={activeChat?.messages?.length ? 'Message Ari…' : 'Ask anything, or start with a file…'} value={input} onChange={e => { setInput(e.target.value); e.target.style.height = 'auto'; e.target.style.height = `${Math.min(e.target.scrollHeight, 180)}px`; }} onKeyDown={handleKeyDown}/><div className="composer-toolbar"><div className="composer-tools"><button className="tool-btn attach-btn" onClick={() => fileRef.current?.click()} title="Attach files"><Paperclip size={17}/><span>Attach</span></button><input ref={fileRef} type="file" multiple hidden onChange={e => { onFiles(e.target.files); e.target.value = ''; }}/><button className={`tool-btn library-chip ${activeLibrarySources.length ? 'library-chip-active' : ''}`} onClick={() => setLibraryOpen(true)} title="Choose knowledge sources"><FileText size={15}/><span>Sources{activeLibrarySources.length ? ` · ${activeLibrarySources.length}` : ''}</span></button><span className="tool-separator"/><button className="tool-btn persona-chip" onClick={() => setPersonaModalOpen(true)} title="Switch persona preset & templates"><UserRound size={14}/><span>{settings.name || 'Ari'} <span className="persona-live">·</span> persona</span></button></div><div className="send-group"><span className="send-hint">Shift + Enter for a new line</span><button className={`send-btn ${busy ? 'send-stop' : ''}`} title={busy ? 'Stop response' : 'Send message'} onClick={() => busy ? abortRef.current?.abort() : send()} disabled={!busy && !input.trim() && !files.length}>{busy ? <span className="stop-square"/> : <ArrowUp size={17}/>}</button></div></div></div><div className="composer-caption">Your conversations stay on this device. Your API key is stored locally in your browser.</div></div></div>
+        </div>
+
+        {canvasArtifact && (
+          <>
+            <div
+              className={`canvas-splitter ${isDraggingCanvas ? 'dragging' : ''}`}
+              onMouseDown={startCanvasDrag}
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize canvas"
+              title="Drag to resize canvas"
+            >
+              <div className="canvas-splitter-handle" />
+            </div>
+
+            <aside
+              className={`canvas-column ${canvasExpanded ? 'canvas-expanded' : ''} ${isDraggingCanvas ? 'is-resizing' : ''}`}
+              style={!canvasExpanded ? { width: `${canvasWidth}%` } : undefined}
+              aria-label="Side-by-side Artifact Canvas"
+            >
+              <header className="canvas-header">
+                <div className="canvas-header-left">
+                  <button
+                    type="button"
+                    className="icon-btn mini canvas-back-btn"
+                    title="Back to conversation"
+                    aria-label="Back to conversation"
+                    onClick={closeCanvas}
+                  >
+                    <ArrowLeft size={16} />
+                  </button>
+                  <span className="canvas-badge">
+                    <Sparkles size={12} />
+                    <span>Artifact</span>
+                  </span>
+                  <span className="canvas-title" title={canvasArtifact.title}>
+                    {canvasArtifact.title || `${canvasArtifact.language?.toUpperCase() || 'Code'} Snippet`}
+                  </span>
+                  <span className="canvas-lang-pill">{canvasArtifact.language}</span>
+                </div>
+
+                <div className="canvas-header-center">
+                  {canvasArtifact.isPreviewable && (
+                    <div className="code-view-tabs canvas-view-tabs" role="tablist" aria-label="Canvas display mode">
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={canvasViewMode === 'preview'}
+                        className={`code-view-tab ${canvasViewMode === 'preview' ? 'active' : ''}`}
+                        onClick={() => setCanvasViewMode('preview')}
+                        title="Live interactive preview"
+                      >
+                        <Play size={13} />
+                        <span>Preview</span>
+                      </button>
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={canvasViewMode === 'code'}
+                        className={`code-view-tab ${canvasViewMode === 'code' ? 'active' : ''}`}
+                        onClick={() => setCanvasViewMode('code')}
+                        title="Editable source code"
+                      >
+                        <Code2 size={13} />
+                        <span>Code</span>
+                      </button>
+                    </div>
+                  )}
+
+                  {canvasArtifact.isPreviewable && canvasArtifact.language?.toLowerCase() !== 'mermaid' && canvasViewMode === 'preview' && (
+                    <div className="html-viewport-switcher canvas-viewport-switcher" role="group" aria-label="Device viewport">
+                      <button
+                        type="button"
+                        className={`viewport-btn ${canvasViewport === 'desktop' ? 'active' : ''}`}
+                        title="Desktop view (100%)"
+                        onClick={() => setCanvasViewport('desktop')}
+                      >
+                        <Monitor size={13} />
+                      </button>
+                      <button
+                        type="button"
+                        className={`viewport-btn ${canvasViewport === 'tablet' ? 'active' : ''}`}
+                        title="Tablet view (768px)"
+                        onClick={() => setCanvasViewport('tablet')}
+                      >
+                        <Tablet size={13} />
+                      </button>
+                      <button
+                        type="button"
+                        className={`viewport-btn ${canvasViewport === 'mobile' ? 'active' : ''}`}
+                        title="Mobile view (375px)"
+                        onClick={() => setCanvasViewport('mobile')}
+                      >
+                        <Smartphone size={13} />
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                <div className="canvas-header-actions">
+                  {['python', 'py'].includes(canvasArtifact.language?.toLowerCase()) && (
+                    <button
+                      type="button"
+                      className={`canvas-header-run-btn ${canvasPythonRunning ? 'is-running' : ''}`}
+                      title="Run script in WebAssembly Python sandbox"
+                      aria-label="Run script"
+                      onClick={handleRunCanvasPython}
+                      disabled={canvasPythonRunning}
+                    >
+                      {canvasPythonRunning ? (
+                        <>
+                          <LoaderCircle size={14} className="spin" />
+                          <span>Running…</span>
+                        </>
+                      ) : (
+                        <>
+                          <Play size={13} fill="currentColor" />
+                          <span>Run</span>
+                        </>
+                      )}
+                    </button>
+                  )}
+                  {canvasArtifact.isPreviewable && (
+                    <button
+                      type="button"
+                      className="icon-btn mini"
+                      title="Refresh preview"
+                      aria-label="Refresh preview"
+                      onClick={() => setCanvasRefreshKey(k => k + 1)}
+                    >
+                      <RotateCcw size={15} />
+                    </button>
+                  )}
+                  {canvasArtifact.isPreviewable && (
+                    <button
+                      type="button"
+                      className="icon-btn mini"
+                      title="Open preview in new tab"
+                      aria-label="Open preview in new tab"
+                      onClick={openCanvasInNewTab}
+                    >
+                      <ExternalLink size={15} />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="icon-btn mini"
+                    title="Download file"
+                    aria-label="Download file"
+                    onClick={downloadCanvasArtifact}
+                  >
+                    <Download size={15} />
+                  </button>
+                  <button
+                    type="button"
+                    className="icon-btn mini"
+                    title={copiedCanvas ? 'Copied' : 'Copy code'}
+                    aria-label={copiedCanvas ? 'Copied' : 'Copy code'}
+                    onClick={copyCanvasCode}
+                  >
+                    {copiedCanvas ? <Check size={15} /> : <Copy size={15} />}
+                  </button>
+                  <button
+                    type="button"
+                    className="icon-btn mini canvas-expand-toggle"
+                    title={canvasExpanded ? 'Restore side-by-side' : 'Expand full width'}
+                    aria-label={canvasExpanded ? 'Restore side-by-side' : 'Expand full width'}
+                    onClick={() => setCanvasExpanded(v => !v)}
+                  >
+                    {canvasExpanded ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+                  </button>
+                  <button
+                    type="button"
+                    className="icon-btn mini canvas-close-btn"
+                    title="Close canvas (Esc)"
+                    aria-label="Close canvas"
+                    onClick={closeCanvas}
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+              </header>
+
+              <div className="canvas-body">
+                {canvasArtifact.isPreviewable && canvasViewMode === 'preview' ? (
+                  canvasArtifact.language?.toLowerCase() === 'mermaid' ? (
+                    <div className="canvas-mermaid-wrap">
+                      <MermaidRenderer
+                        source={canvasArtifact.source}
+                        theme={appTheme}
+                        inCanvas={true}
+                      />
+                    </div>
+                  ) : (
+                    <div className={`canvas-preview-wrap viewport-${canvasViewport}`}>
+                      <div className="canvas-frame-container">
+                        <iframe
+                          key={`canvas-frame-${canvasRefreshKey}`}
+                          title="Interactive Canvas Sandbox"
+                          srcDoc={buildHtmlPreviewDoc(canvasArtifact.source)}
+                          sandbox="allow-scripts allow-modals allow-forms allow-popups"
+                          className="canvas-preview-iframe"
+                        />
+                      </div>
+                    </div>
+                  )
+                ) : (
+                  <div className="canvas-code-wrap">
+                    <div className="canvas-code-toolbar">
+                      <span className="canvas-code-info">
+                        {canvasArtifact.source.split('\n').length} lines · {formatSize(new Blob([canvasArtifact.source]).size)}
+                      </span>
+                      {['python', 'py'].includes(canvasArtifact.language?.toLowerCase()) ? (
+                        <button
+                          type="button"
+                          className={`canvas-run-inline-btn ${canvasPythonRunning ? 'is-running' : ''}`}
+                          onClick={handleRunCanvasPython}
+                          disabled={canvasPythonRunning}
+                        >
+                          {canvasPythonRunning ? <LoaderCircle size={13} className="spin" /> : <Play size={12} fill="currentColor" />}
+                          <span>{canvasPythonRunning ? 'Running…' : 'Run Script'}</span>
+                        </button>
+                      ) : (
+                        <span className="canvas-code-badge">Live Editable</span>
+                      )}
+                    </div>
+                    <div className="canvas-editor-area">
+                      <textarea
+                        className="canvas-code-editor"
+                        value={canvasArtifact.source}
+                        onChange={e => updateCanvasSource(e.target.value)}
+                        spellCheck="false"
+                        autoCapitalize="off"
+                        autoComplete="off"
+                        autoCorrect="off"
+                        aria-label="Editable artifact code"
+                      />
+                    </div>
+                    {['python', 'py'].includes(canvasArtifact.language?.toLowerCase()) && (canvasPythonOutput || canvasPythonRunning) && (
+                      <PythonOutputDrawer
+                        output={canvasPythonOutput}
+                        isRunning={canvasPythonRunning}
+                        onRerun={handleRunCanvasPython}
+                        onClear={() => setCanvasPythonOutput(null)}
+                        onClose={() => setCanvasPythonOutput(null)}
+                      />
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <footer className="canvas-footer">
+                <div className="canvas-quick-actions">
+                  <span className="canvas-quick-label">
+                    <Sparkles size={12} /> Ask Ari to iterate:
+                  </span>
+                  <div className="canvas-prompt-pills">
+                    {(canvasArtifact.language?.toLowerCase() === 'mermaid' ? MERMAID_QUICK_ACTIONS : ['python', 'py'].includes(canvasArtifact.language?.toLowerCase()) ? PYTHON_QUICK_ACTIONS : CANVAS_QUICK_ACTIONS).map(action => (
+                      <button
+                        key={action.label}
+                        type="button"
+                        className="canvas-pill"
+                        onClick={() => applyCanvasQuickPrompt(action.prompt)}
+                      >
+                        {action.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </footer>
+            </aside>
+          </>
         )}
       </div>
-      <div className="composer-area"><div className="composer-wrap"><div className="file-previews">{files.map(f => { const Icon = fileIcon(f.type); return <div className="file-chip" key={f.id}>{f.image && f.dataUrl ? <img src={f.dataUrl} alt=""/> : <span className="file-chip-icon"><Icon size={15}/></span>}<span className="file-chip-text"><b>{f.name}</b><small>{formatSize(f.size)}</small></span><button onClick={() => setFiles(v => v.filter(x => x.id !== f.id))}><X size={13}/></button></div>; })}</div>
-        <div className="composer"><textarea ref={textareaRef} rows="1" placeholder={activeChat?.messages?.length ? 'Message Ari…' : 'Ask anything, or start with a file…'} value={input} onChange={e => { setInput(e.target.value); e.target.style.height = 'auto'; e.target.style.height = `${Math.min(e.target.scrollHeight, 180)}px`; }} onKeyDown={handleKeyDown}/><div className="composer-toolbar"><div className="composer-tools"><button className="tool-btn attach-btn" onClick={() => fileRef.current?.click()} title="Attach files"><Paperclip size={17}/><span>Attach</span></button><input ref={fileRef} type="file" multiple hidden onChange={e => { onFiles(e.target.files); e.target.value = ''; }}/><button className={`tool-btn library-chip ${activeLibrarySources.length ? 'library-chip-active' : ''}`} onClick={() => setLibraryOpen(true)} title="Choose knowledge sources"><FileText size={15}/><span>Sources{activeLibrarySources.length ? ` · ${activeLibrarySources.length}` : ''}</span></button><span className="tool-separator"/><button className="tool-btn persona-chip" onClick={() => { setSettingsTab('persona'); setSettingsOpen(true); }}><UserRound size={14}/><span>{settings.name || 'Ari'} <span className="persona-live">·</span> persona</span></button></div><div className="send-group"><span className="send-hint">Shift + Enter for a new line</span><button className={`send-btn ${busy ? 'send-stop' : ''}`} title={busy ? 'Stop response' : 'Send message'} onClick={() => busy ? abortRef.current?.abort() : send()} disabled={!busy && !input.trim() && !files.length}>{busy ? <span className="stop-square"/> : <ArrowUp size={17}/>}</button></div></div></div><div className="composer-caption">Your conversations stay on this device. Your API key is stored locally in your browser.</div></div></div>
     </main>
     {libraryOpen && <div className="modal-backdrop library-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) setLibraryOpen(false); }}><section className="library-modal" role="dialog" aria-modal="true" aria-labelledby="library-title"><header className="library-head"><div><div className="modal-kicker">LOCAL KNOWLEDGE</div><h2 id="library-title">Knowledge Library</h2><p>Upload once, then choose the sources this chat can use.</p></div><button className="icon-btn" aria-label="Close Knowledge Library" onClick={() => setLibraryOpen(false)}><X size={19}/></button></header><div className="library-content"><div className="library-upload-card"><div className="library-upload-icon"><FileText size={18}/></div><div><b>Add reference files</b><small>PDF, DOCX, text, code, CSV, and images stay in this browser.</small></div><button className="library-upload-button" onClick={() => libraryFileRef.current?.click()}><Upload size={15}/>Add files</button><input ref={libraryFileRef} type="file" multiple hidden onChange={e => { onLibraryFiles(e.target.files); e.target.value = ''; }}/></div><div className="library-list-heading"><span>Your sources</span><small>{library.length} saved</small></div>{library.length ? <div className="library-source-list">{library.map(source => { const selected = activeChat?.librarySourceIds?.includes(source.id); const Icon = fileIcon(source.type); return <div className={`library-source-row ${selected ? 'library-source-selected' : ''}`} key={source.id}><button className="library-source-select" onClick={() => toggleLibrarySource(source.id)} aria-pressed={selected}><span className="library-source-check">{selected && <Check size={12}/>}</span><span className="library-source-icon"><Icon size={16}/></span><span className="library-source-copy"><b title={source.name}>{source.name}</b><small>{formatSize(source.size)} · {source.content ? 'Text ready' : source.image ? 'Visual source' : 'File attached'}</small></span></button><button className="library-source-remove" title={`Remove ${source.name}`} aria-label={`Remove ${source.name}`} onClick={() => removeLibrarySource(source.id)}><Trash2 size={15}/></button></div>; })}</div> : <div className="library-empty"><FileText size={20}/><b>Your library is empty</b><span>Add a resume, project brief, or reference document to reuse it across chats.</span></div>}<p className="library-note"><ShieldCheck size={14}/> Selected sources are sent with each new request in this chat. Your library stays on this device.</p></div><footer className="library-footer"><span>{activeLibrarySources.length ? `${activeLibrarySources.length} source${activeLibrarySources.length === 1 ? '' : 's'} active for this chat` : 'No sources selected for this chat'}</span><button className="done-btn" onClick={() => setLibraryOpen(false)}>Done</button></footer></section></div>}
     {settingsOpen && <div className="modal-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) setSettingsOpen(false); }}><div className={`settings-modal ${settingsTab === 'connection' ? 'model-settings-modal' : ''}`}><div className="modal-head"><div><div className="modal-kicker">{settingsTab === 'connection' ? 'MODEL SETTINGS' : 'PREFERENCES'}</div><h2>{settingsTab === 'connection' ? 'Model settings' : 'Settings'}</h2></div><button className="icon-btn" onClick={() => setSettingsOpen(false)}><X size={19}/></button></div><div className="settings-layout"><nav className="settings-nav"><button className={settingsTab==='connection'?'nav-active':''} onClick={() => setSettingsTab('connection')}><KeyRound size={16}/> Models</button><button className={settingsTab==='persona'?'nav-active':''} onClick={() => setSettingsTab('persona')}><UserRound size={16}/> Persona</button><button className={settingsTab==='preferences'?'nav-active':''} onClick={() => setSettingsTab('preferences')}><SlidersHorizontal size={16}/> Preferences</button></nav><div className="settings-content">
@@ -742,20 +1585,319 @@ export default function App() {
               <p className="settings-note"><AlertCircle size={14}/> This app supports OpenAI chat-completions compatible endpoints. The provider must allow browser requests (CORS).</p>
             </div></section>
           </div>}
-          {settingsTab==='persona' && <><div className="section-title">Your assistant’s personality</div><p className="section-copy">Give your assistant a name, a point of view, and a little context about how to help.</p><label className="form-label">Assistant name</label><input className="form-input" maxLength="32" placeholder="Ari" value={settings.name} onChange={e => patchSettings({ name:e.target.value })}/><label className="form-label">Persona instructions</label><textarea className="form-input persona-textarea" value={settings.persona} onChange={e => patchSettings({ persona:e.target.value })} placeholder="Describe how your assistant should sound and behave…"/><div className="hint-block"><Sparkles size={15}/><span>Try: “You’re a friendly career coach who gives candid feedback and helps me prepare for interviews.”</span></div><label className="form-label">Extra context or instructions <span className="optional-label">OPTIONAL</span></label><textarea className="form-input persona-textarea short-area" value={settings.systemPrompt} onChange={e => patchSettings({ systemPrompt:e.target.value })} placeholder="Add extra background, preferences, or instructions…"/><p className="settings-note"><ShieldCheck size={14}/> Your instructions are stored locally and included in requests to your provider.</p></>}
-          {settingsTab==='preferences' && <><div className="section-title">Appearance</div><p className="section-copy">Choose how Forma looks on this device.</p><label className="form-label">Theme</label><select className="form-input theme-select" value={settings.theme || 'dark'} onChange={e => patchSettings({ theme:e.target.value })}><option value="dark">Dark</option><option value="light">Light</option><option value="system">Use system setting</option></select><div className="settings-divider"/><div className="section-title">Response preferences</div><p className="section-copy">Control response length and creativity.</p><label className="range-label form-label">Temperature <span>{settings.temperature}</span></label><input className="range-input" type="range" min="0" max="2" step="0.1" value={settings.temperature} onChange={e => patchSettings({ temperature:e.target.value })}/><div className="range-hints"><span>Focused</span><span>Creative</span></div><label className="output-cap-toggle"><span><b>No app-set output limit</b><small>Omit the token limit from requests. Your provider may still enforce its own maximum.</small></span><input type="checkbox" checked={Boolean(settings.unlimitedOutput)} onChange={e => patchSettings({ unlimitedOutput:e.target.checked })}/></label>{!settings.unlimitedOutput && <><label className="form-label">Maximum response tokens</label><input className="form-input" type="number" min="128" max="32768" step="128" value={settings.maxTokens} onChange={e => patchSettings({ maxTokens:e.target.value })}/></>}<div className="settings-divider"/><div className="section-title small-title">Your data</div><p className="section-copy">Chats and settings are saved only in this browser. Export a backup or clear your conversation history.</p><div className="data-actions"><button className="secondary-action" onClick={exportChats}><Download size={15}/> Export chats</button><button className="danger-action" onClick={() => { if (confirm('Delete every saved conversation? This cannot be undone.')) { setChats([]); setActiveId(null); } }}><Trash2 size={15}/> Clear chat history</button></div><button className="danger-action clear-key" onClick={() => { setProviders(list => list.map(p => p.id === activeProviderId ? { ...p, apiKey: '' } : p)); setToast('Active provider API key cleared'); }}>Clear active provider API key</button></>}
+          {settingsTab==='persona' && <>
+            <div className="section-title">Persona Presets</div>
+            <p className="section-copy">Choose a specialized personality or customize your assistant below.</p>
+            <div className="persona-preset-chips">
+              {[...BUILTIN_PERSONAS, ...customPersonas].map(p => {
+                const isActive = activePersonaId === p.id || (!p.isCustom && p.name.toLowerCase() === (settings.name || '').toLowerCase());
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    className={`persona-preset-pill ${isActive ? 'active' : ''}`}
+                    onClick={() => selectPersona(p)}
+                  >
+                    <span className="persona-preset-pill-avatar">{p.avatar}</span>
+                    <span className="persona-preset-pill-name">{p.name}</span>
+                    <small>{p.badge}</small>
+                  </button>
+                );
+              })}
+              <button
+                type="button"
+                className="persona-preset-pill persona-preset-more"
+                onClick={() => { setSettingsOpen(false); setPersonaModalOpen(true); }}
+              >
+                <Plus size={13} />
+                <span>Browse &amp; Create</span>
+              </button>
+            </div>
+            <div className="settings-divider"/>
+            <div className="section-title">Your assistant’s personality</div>
+            <p className="section-copy">Give your assistant a name, a point of view, and a little context about how to help.</p>
+            <label className="form-label">Assistant name</label>
+            <input className="form-input" maxLength="32" placeholder="Ari" value={settings.name} onChange={e => patchSettings({ name:e.target.value })}/>
+            <label className="form-label">Persona instructions</label>
+            <textarea className="form-input persona-textarea" value={settings.persona} onChange={e => patchSettings({ persona:e.target.value })} placeholder="Describe how your assistant should sound and behave…"/>
+            <div className="hint-block"><Sparkles size={15}/><span>Try: “You’re a friendly career coach who gives candid feedback and helps me prepare for interviews.”</span></div>
+            <label className="form-label">Extra context or instructions <span className="optional-label">OPTIONAL</span></label>
+            <textarea className="form-input persona-textarea short-area" value={settings.systemPrompt} onChange={e => patchSettings({ systemPrompt:e.target.value })} placeholder="Add extra background, preferences, or instructions…"/>
+            <div className="persona-custom-save-row">
+              <button
+                type="button"
+                className="secondary-action"
+                onClick={() => {
+                  saveCustomPersona({
+                    name: settings.name || 'Custom Persona',
+                    badge: 'Custom',
+                    tagline: 'Custom saved persona',
+                    avatar: (settings.name || 'C')[0].toUpperCase(),
+                    persona: settings.persona,
+                    systemPrompt: settings.systemPrompt || '',
+                    temperature: settings.temperature,
+                    starters: [
+                      { icon: Sparkles, title: `Consult ${settings.name}`, text: `Hello ${settings.name}, let's work on a project.` }
+                    ]
+                  });
+                  setToast(`Saved "${settings.name}" to custom personas!`);
+                }}
+              >
+                <Bookmark size={14}/> Save current as custom persona
+              </button>
+            </div>
+            <p className="settings-note"><ShieldCheck size={14}/> Your instructions are stored locally and included in requests to your provider.</p>
+          </>}
+          {settingsTab==='preferences' && <><div className="section-title">Appearance</div><p className="section-copy">Choose how Forma looks on this device.</p><label className="form-label">Theme</label><select className="form-input theme-select" value={settings.theme || 'dark'} onChange={e => patchSettings({ theme:e.target.value })}><option value="dark">Dark</option><option value="light">Light</option><option value="system">Use system setting</option></select><div className="settings-divider"/><div className="section-title">Response preferences</div><p className="section-copy">Control response length and creativity.</p><label className="range-label form-label">Temperature <span>{settings.temperature}</span></label><input className="range-input" type="range" min="0" max="2" step="0.1" value={settings.temperature} onChange={e => patchSettings({ temperature:e.target.value })}/><div className="range-hints"><span>Focused</span><span>Creative</span></div><label className="output-cap-toggle"><span><b>No app-set output limit</b><small>Omit the token limit from requests. Your provider may still enforce its own maximum.</small></span><input type="checkbox" checked={Boolean(settings.unlimitedOutput)} onChange={e => patchSettings({ unlimitedOutput:e.target.checked })}/></label>{!settings.unlimitedOutput && <><label className="form-label">Maximum response tokens</label><input className="form-input" type="number" min="128" max="32768" step="128" value={settings.maxTokens} onChange={e => patchSettings({ maxTokens:e.target.value })}/></>}<div className="settings-divider"/><div className="section-title small-title">Forma Web App &amp; Offline PWA</div><p className="section-copy">Forma runs locally in your browser with service-worker offline caching and standalone installation.</p><div className="pwa-settings-card"><div className="pwa-status-row"><span className={`pwa-status-dot ${isInstalled ? 'dot-active' : ''}`} /><span>{isInstalled ? 'Installed as standalone app' : 'Ready for standalone desktop/mobile installation'}</span></div>{installPrompt ? (<button type="button" className="primary-action pwa-install-action" onClick={triggerPwaInstall}><Download size={15} /> Install Forma on this device</button>) : isInstalled ? (<span className="pwa-installed-pill"><Check size={14} /> Installed</span>) : (<span className="pwa-manual-tip">To install, click the Install icon in your browser URL bar or "Add to Home Screen" in mobile Safari/Chrome.</span>)}</div><div className="settings-divider"/><div className="section-title small-title">Your data</div><p className="section-copy">Chats and settings are saved only in this browser. Export a backup or clear your conversation history.</p><div className="data-actions"><button className="secondary-action" onClick={exportChats}><Download size={15}/> Export chats</button><button className="danger-action" onClick={() => { if (confirm('Delete every saved conversation? This cannot be undone.')) { setChats([]); setActiveId(null); } }}><Trash2 size={15}/> Clear chat history</button></div><button className="danger-action clear-key" onClick={() => { setProviders(list => list.map(p => p.id === activeProviderId ? { ...p, apiKey: '' } : p)); setToast('Active provider API key cleared'); }}>Clear active provider API key</button></>}
         </div></div><footer className="modal-footer"><span><ShieldCheck size={14}/> Saved automatically on this device</span><button className="done-btn" onClick={() => { setSettingsOpen(false); setToast('Settings saved'); }}>Done</button></footer></div></div>}
     {deleteChatId && <div className="modal-backdrop delete-confirm-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) setDeleteChatId(null); }}><section className="delete-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-chat-title"><div className="delete-confirm-icon"><Trash2 size={18}/></div><h2 id="delete-chat-title">Delete this chat?</h2><p><strong>{chats.find(c => c.id === deleteChatId)?.title || 'This conversation'}</strong> and its messages will be permanently removed from this device.</p><div className="delete-confirm-actions"><button className="delete-cancel-button" autoFocus onClick={() => setDeleteChatId(null)}>Cancel</button><button className="delete-confirm-button" onClick={() => removeChat(deleteChatId)}>Delete chat</button></div></section></div>}
+    <PersonaModal
+      isOpen={personaModalOpen}
+      onClose={() => setPersonaModalOpen(false)}
+      activePersonaId={activePersonaId}
+      onSelectPersona={selectPersona}
+      customPersonas={customPersonas}
+      onSaveCustomPersona={saveCustomPersona}
+      onDeleteCustomPersona={deleteCustomPersona}
+      currentSettings={settings}
+    />
     {toast && <div className="toast"><Check size={15}/>{toast}</div>}
-  </div>;
+      </div>
+    </CanvasContext.Provider>
+  );
 }
 
-function Message({ message, onRetry, onEditSubmit, onBranch, onRegenerate, onToggleBookmark, assistantName = 'Assistant', busy = false }) {
+function PersonaModal({
+  isOpen,
+  onClose,
+  activePersonaId,
+  onSelectPersona,
+  customPersonas = [],
+  onSaveCustomPersona,
+  onDeleteCustomPersona,
+  currentSettings,
+}) {
+  const [search, setSearch] = useState('');
+  const [isCreating, setIsCreating] = useState(false);
+  const [customName, setCustomName] = useState('');
+  const [customBadge, setCustomBadge] = useState('');
+  const [customTagline, setCustomTagline] = useState('');
+  const [customPersona, setCustomPersona] = useState('');
+  const [customSystemPrompt, setCustomSystemPrompt] = useState('');
+  const [customTemp, setCustomTemp] = useState(0.7);
+
+  if (!isOpen) return null;
+
+  const allPersonas = [...BUILTIN_PERSONAS, ...customPersonas];
+  const query = search.trim().toLowerCase();
+  const filteredPersonas = allPersonas.filter(p =>
+    !query ||
+    p.name.toLowerCase().includes(query) ||
+    p.badge?.toLowerCase().includes(query) ||
+    p.tagline?.toLowerCase().includes(query)
+  );
+
+  const handleSave = () => {
+    if (!customName.trim() || !customPersona.trim()) return;
+    onSaveCustomPersona({
+      name: customName.trim(),
+      badge: customBadge.trim() || 'Custom',
+      tagline: customTagline.trim() || 'Custom AI Persona',
+      avatar: customName.trim()[0].toUpperCase(),
+      persona: customPersona.trim(),
+      systemPrompt: customSystemPrompt.trim(),
+      temperature: Number(customTemp),
+      starters: [
+        { icon: Sparkles, title: `Consult ${customName.trim()}`, text: `Hello ${customName.trim()}, let's start working on a project.` }
+      ]
+    });
+    setIsCreating(false);
+    setCustomName('');
+    setCustomBadge('');
+    setCustomTagline('');
+    setCustomPersona('');
+    setCustomSystemPrompt('');
+  };
+
+  return (
+    <div
+      className="modal-backdrop persona-modal-backdrop"
+      onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <section className="persona-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="persona-modal-title">
+        <header className="persona-modal-head">
+          <div>
+            <div className="modal-kicker">PERSONA &amp; TEMPLATE LIBRARY</div>
+            <h2 id="persona-modal-title">Choose Your AI Persona</h2>
+            <p>Switch roles, specialized system prompts, and starter workflows with one click.</p>
+          </div>
+          <button className="icon-btn" aria-label="Close Persona Library" onClick={onClose}>
+            <X size={19}/>
+          </button>
+        </header>
+
+        <div className="persona-modal-toolbar">
+          <div className="persona-search-field">
+            <Search size={15}/>
+            <input
+              placeholder="Search personas by role, skill, or style…"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+            />
+          </div>
+          <button
+            className={`persona-create-trigger-btn ${isCreating ? 'active' : ''}`}
+            onClick={() => setIsCreating(v => !v)}
+          >
+            {isCreating ? <X size={14}/> : <Plus size={14}/>}
+            <span>{isCreating ? 'Cancel' : 'New Custom Persona'}</span>
+          </button>
+        </div>
+
+        {isCreating && (
+          <div className="custom-persona-form-card">
+            <h3>Create Custom Persona</h3>
+            <div className="custom-persona-grid">
+              <div>
+                <label className="form-label">Persona Name</label>
+                <input
+                  className="form-input"
+                  placeholder="e.g. Mentor, Socrates, Legal Eagle"
+                  value={customName}
+                  onChange={e => setCustomName(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="form-label">Role Badge</label>
+                <input
+                  className="form-input"
+                  placeholder="e.g. Legal Analyst, Writing Coach"
+                  value={customBadge}
+                  onChange={e => setCustomBadge(e.target.value)}
+                />
+              </div>
+            </div>
+            <label className="form-label">One-Line Tagline</label>
+            <input
+              className="form-input"
+              placeholder="e.g. Socratic tutor challenging assumptions with rigorous inquiry"
+              value={customTagline}
+              onChange={e => setCustomTagline(e.target.value)}
+            />
+            <label className="form-label">Persona Instructions (Behavior &amp; Tone)</label>
+            <textarea
+              className="form-input persona-textarea"
+              placeholder="Describe how this persona should respond, think, and format answers…"
+              value={customPersona}
+              onChange={e => setCustomPersona(e.target.value)}
+            />
+            <div className="custom-persona-actions">
+              <button
+                className="edit-cancel"
+                onClick={() => setIsCreating(false)}
+              >
+                Cancel
+              </button>
+              <button
+                className="edit-save"
+                disabled={!customName.trim() || !customPersona.trim()}
+                onClick={handleSave}
+              >
+                Save &amp; Activate
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div className="persona-cards-grid">
+          {filteredPersonas.map(persona => {
+            const isActive = activePersonaId === persona.id ||
+              (!persona.isCustom && persona.name.toLowerCase() === (currentSettings.name || '').toLowerCase());
+
+            return (
+              <div
+                key={persona.id}
+                className={`persona-card ${isActive ? 'persona-card-active' : ''}`}
+              >
+                <div className="persona-card-top">
+                  <div className="persona-card-avatar-wrap">
+                    <span className="persona-avatar-icon">{persona.avatar}</span>
+                  </div>
+                  <div className="persona-card-meta">
+                    <div className="persona-card-title-row">
+                      <h4>{persona.name}</h4>
+                      <span className="persona-badge-tag">{persona.badge}</span>
+                      {isActive && <span className="persona-active-badge"><Check size={11}/> Active</span>}
+                    </div>
+                    <p className="persona-card-tagline">{persona.tagline}</p>
+                  </div>
+                </div>
+
+                <div className="persona-card-prompt-preview">
+                  "{persona.persona.slice(0, 130)}…"
+                </div>
+
+                {persona.starters?.length > 0 && (
+                  <div className="persona-starters-preview">
+                    <span className="starters-preview-label">Starter prompts:</span>
+                    <div className="starters-pill-row">
+                      {persona.starters.slice(0, 2).map((s, idx) => (
+                        <span key={idx} className="starter-pill-chip" title={s.text}>
+                          {s.title}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="persona-card-footer">
+                  <button
+                    className={`persona-apply-btn ${isActive ? 'applied' : ''}`}
+                    onClick={() => onSelectPersona(persona)}
+                  >
+                    {isActive ? (
+                      <>
+                        <Check size={14}/>
+                        <span>Currently Active</span>
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles size={14}/>
+                        <span>Activate Persona</span>
+                      </>
+                    )}
+                  </button>
+
+                  {persona.isCustom && (
+                    <button
+                      className="persona-delete-custom-btn"
+                      title="Delete custom persona"
+                      onClick={() => onDeleteCustomPersona(persona.id)}
+                    >
+                      <Trash2 size={14}/>
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function Message({ message, onRetry, onEditSubmit, onBranch, onRegenerate, onSwitchVersion, onToggleBookmark, assistantName = 'Assistant', busy = false }) {
   const [copied, setCopied] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(message.content || '');
   const user = message.role === 'user';
   const promptParts = !user ? splitPromptResponse(message.content) : null;
+  const hasVersions = message.versions && message.versions.length > 1;
+  const activeVersionIdx = typeof message.activeVersionIndex === 'number'
+    ? message.activeVersionIndex
+    : ((message.versions?.length || 1) - 1);
+
   const copy = async () => {
     try {
       await copyText(message.content || '');
@@ -766,20 +1908,115 @@ function Message({ message, onRetry, onEditSubmit, onBranch, onRegenerate, onTog
     }
   };
   const saveEdit = () => { const text = draft.trim(); if (!text && !message.attachments?.length) return; onEditSubmit(message, text); setEditing(false); };
-  return <article id={`message-${message.id}`} className={`message ${user ? 'user-message' : 'assistant-message'}`}>
-    <div className="message-avatar">{user ? <span className="user-dot"><UserRound size={14}/></span> : <span className="assistant-mark"><MessageSquare size={13}/></span>}</div>
-    <div className="message-content">
-      <div className="message-body">
-        <div className="message-author">{user ? 'You' : assistantName}</div>
-        {message.attachments?.length > 0 && <div className="message-files">{message.attachments.map(f => f.image && f.dataUrl ? <img className="message-image" key={f.id} src={f.dataUrl} alt={f.name}/> : <div className="message-file" key={f.id}><FileText size={16}/><span>{f.name}</span></div>)}</div>}
-        {editing ? <div className="message-edit"><textarea aria-label="Edit your message" value={draft} onChange={e => setDraft(e.target.value)} onKeyDown={e => { if (e.key === 'Escape') setEditing(false); if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); saveEdit(); } }}/><div className="message-edit-actions"><button className="edit-cancel" onClick={() => { setDraft(message.content || ''); setEditing(false); }}>Cancel</button><button className="edit-save" disabled={busy || (!draft.trim() && !message.attachments?.length)} onClick={saveEdit}>Save &amp; branch</button></div></div> : message.content && (promptParts ? <>{promptParts.intro && <div className="markdown-body prompt-intro"><MarkdownContent content={promptParts.intro}/></div>}<CopyablePromptCard content={promptParts.prompt}/>{promptParts.outro && <div className="markdown-body prompt-outro"><MarkdownContent content={promptParts.outro}/></div>}</> : <div className="markdown-body"><MarkdownContent content={message.content}/></div>)}
-        {message.streaming && <div className="typing-dots"><i/><i/><i/></div>}
-        {message.error && <div className="error-card"><AlertCircle size={16}/><span>{message.error}</span><button onClick={onRetry}>Try again</button></div>}
+  return (
+    <article id={`message-${message.id}`} className={`message ${user ? 'user-message' : 'assistant-message'}`}>
+      <div className="message-avatar">{user ? <span className="user-dot"><UserRound size={14}/></span> : <span className="assistant-mark"><img src="/icon.svg" alt="AI" className="assistant-mark-img" /></span>}</div>
+      <div className="message-content">
+        <div className="message-body">
+          <div className="message-author">{user ? 'You' : assistantName}</div>
+          {message.attachments?.length > 0 && <div className="message-files">{message.attachments.map(f => f.image && f.dataUrl ? <img className="message-image" key={f.id} src={f.dataUrl} alt={f.name}/> : <div className="message-file" key={f.id}><FileText size={16}/><span>{f.name}</span></div>)}</div>}
+          {editing ? (
+            <div className="message-edit">
+              <textarea aria-label="Edit your message" value={draft} onChange={e => setDraft(e.target.value)} onKeyDown={e => { if (e.key === 'Escape') setEditing(false); if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); saveEdit(); } }}/>
+              <div className="message-edit-actions">
+                <button className="edit-cancel" onClick={() => { setDraft(message.content || ''); setEditing(false); }}>Cancel</button>
+                <button className="edit-save" disabled={busy || (!draft.trim() && !message.attachments?.length)} onClick={saveEdit}>Save &amp; submit</button>
+              </div>
+            </div>
+          ) : message.content && (promptParts ? <>{promptParts.intro && <div className="markdown-body prompt-intro"><MarkdownContent content={promptParts.intro}/></div>}<CopyablePromptCard content={promptParts.prompt}/>{promptParts.outro && <div className="markdown-body prompt-outro"><MarkdownContent content={promptParts.outro}/></div>}</> : <div className="markdown-body"><MarkdownContent content={message.content}/></div>)}
+          {message.streaming && <div className="typing-dots"><i/><i/><i/></div>}
+          {message.error && <div className="error-card"><AlertCircle size={16}/><span>{message.error}</span><button onClick={onRetry}>Try again</button></div>}
+        </div>
+        {user && !editing && (
+          <div className="message-actions user-message-actions">
+            {hasVersions && (
+              <div className="message-version-switcher" role="group" aria-label="Message versions">
+                <button
+                  type="button"
+                  className="version-nav-btn"
+                  disabled={activeVersionIdx <= 0 || busy}
+                  onClick={() => onSwitchVersion?.(message, activeVersionIdx - 1)}
+                  title="Previous edit"
+                  aria-label="Previous edit"
+                >
+                  <ChevronLeft size={13} />
+                </button>
+                <span className="version-counter-text">
+                  {activeVersionIdx + 1} / {message.versions.length}
+                </span>
+                <button
+                  type="button"
+                  className="version-nav-btn"
+                  disabled={activeVersionIdx >= message.versions.length - 1 || busy}
+                  onClick={() => onSwitchVersion?.(message, activeVersionIdx + 1)}
+                  title="Next edit"
+                  aria-label="Next edit"
+                >
+                  <ChevronRight size={13} />
+                </button>
+              </div>
+            )}
+            <time className="message-time">{formatMessageTime(message.createdAt)}</time>
+            <button title={copied ? 'Copied' : 'Copy message'} aria-label={copied ? 'Copied' : 'Copy message'} onClick={copy}>
+              {copied ? <Check size={15}/> : <Copy size={15}/>}<span>{copied ? 'Copied' : 'Copy'}</span>
+            </button>
+            <button className={message.bookmarked ? 'bookmarked-action' : ''} title={message.bookmarked ? 'Remove bookmark' : 'Bookmark turn'} aria-label={message.bookmarked ? 'Remove bookmark' : 'Bookmark turn'} onClick={onToggleBookmark}>
+              <Bookmark size={15} fill={message.bookmarked ? 'currentColor' : 'none'}/><span>{message.bookmarked ? 'Saved' : 'Bookmark'}</span>
+            </button>
+            <button title="Edit message" aria-label="Edit message" disabled={busy} onClick={() => { setDraft(message.content || ''); setEditing(true); }}>
+              <SquarePen size={15}/><span>Edit</span>
+            </button>
+            <button title="Branch into new conversation" aria-label="Branch into new conversation" disabled={busy} onClick={() => onBranch(message)}>
+              <GitBranch size={15}/><span>Branch</span>
+            </button>
+          </div>
+        )}
+        {!user && !message.streaming && !message.error && message.content && (
+          <div className="message-actions">
+            {hasVersions && (
+              <div className="message-version-switcher" role="group" aria-label="Message versions">
+                <button
+                  type="button"
+                  className="version-nav-btn"
+                  disabled={activeVersionIdx <= 0 || busy}
+                  onClick={() => onSwitchVersion?.(message, activeVersionIdx - 1)}
+                  title="Previous response"
+                  aria-label="Previous response"
+                >
+                  <ChevronLeft size={13} />
+                </button>
+                <span className="version-counter-text">
+                  {activeVersionIdx + 1} / {message.versions.length}
+                </span>
+                <button
+                  type="button"
+                  className="version-nav-btn"
+                  disabled={activeVersionIdx >= message.versions.length - 1 || busy}
+                  onClick={() => onSwitchVersion?.(message, activeVersionIdx + 1)}
+                  title="Next response"
+                  aria-label="Next response"
+                >
+                  <ChevronRight size={13} />
+                </button>
+              </div>
+            )}
+            <button title={copied ? 'Copied' : 'Copy response'} aria-label={copied ? 'Copied' : 'Copy response'} onClick={copy}>
+              {copied ? <Check size={15}/> : <Copy size={15}/>}<span>{copied ? 'Copied' : 'Copy'}</span>
+            </button>
+            <button className={message.bookmarked ? 'bookmarked-action' : ''} title={message.bookmarked ? 'Remove bookmark' : 'Bookmark response'} aria-label={message.bookmarked ? 'Remove bookmark' : 'Bookmark response'} onClick={onToggleBookmark}>
+              <Bookmark size={15} fill={message.bookmarked ? 'currentColor' : 'none'}/><span>{message.bookmarked ? 'Saved' : 'Bookmark'}</span>
+            </button>
+            <button title="Regenerate response" aria-label="Regenerate response" disabled={busy} onClick={() => onRegenerate(message)}>
+              <RotateCcw size={15}/><span>Regenerate</span>
+            </button>
+            <button title="Branch into new conversation" aria-label="Branch into new conversation" disabled={busy} onClick={() => onBranch(message)}>
+              <GitBranch size={15}/><span>Branch</span>
+            </button>
+          </div>
+        )}
       </div>
-      {user && !editing && <div className="message-actions user-message-actions"><time className="message-time">{formatMessageTime(message.createdAt)}</time><button title={copied ? 'Copied' : 'Copy message'} aria-label={copied ? 'Copied' : 'Copy message'} onClick={copy}>{copied ? <Check size={15}/> : <Copy size={15}/>}<span>{copied ? 'Copied' : 'Copy'}</span></button><button className={message.bookmarked ? 'bookmarked-action' : ''} title={message.bookmarked ? 'Remove bookmark' : 'Bookmark turn'} aria-label={message.bookmarked ? 'Remove bookmark' : 'Bookmark turn'} onClick={onToggleBookmark}><Bookmark size={15} fill={message.bookmarked ? 'currentColor' : 'none'}/><span>{message.bookmarked ? 'Saved' : 'Bookmark'}</span></button><button title="Edit message" aria-label="Edit message" disabled={busy} onClick={() => { setDraft(message.content || ''); setEditing(true); }}><SquarePen size={15}/><span>Edit</span></button><button title="Branch from message" aria-label="Branch from message" disabled={busy} onClick={() => onBranch(message)}><GitBranch size={15}/><span>Branch</span></button></div>}
-      {!user && !message.streaming && !message.error && message.content && <div className="message-actions"><button title={copied ? 'Copied' : 'Copy response'} aria-label={copied ? 'Copied' : 'Copy response'} onClick={copy}>{copied ? <Check size={15}/> : <Copy size={15}/>}<span>{copied ? 'Copied' : 'Copy'}</span></button><button className={message.bookmarked ? 'bookmarked-action' : ''} title={message.bookmarked ? 'Remove bookmark' : 'Bookmark response'} aria-label={message.bookmarked ? 'Remove bookmark' : 'Bookmark response'} onClick={onToggleBookmark}><Bookmark size={15} fill={message.bookmarked ? 'currentColor' : 'none'}/><span>{message.bookmarked ? 'Saved' : 'Bookmark'}</span></button><button title="Regenerate response" aria-label="Regenerate response" disabled={busy} onClick={() => onRegenerate(message)}><RotateCcw size={15}/><span>Regenerate</span></button><button title="Branch from response" aria-label="Branch from response" disabled={busy} onClick={() => onBranch(message)}><GitBranch size={15}/><span>Branch</span></button></div>}
-    </div>
-  </article>;
+    </article>
+  );
 }
 const makePromptParts = (intro, rawPrompt) => {
   const outroStart = /\n{2,}(?=(?:a quick tip|that(?:'|’)s it!?|let me know if you|if you(?:'|’)d like))/i.exec(rawPrompt);
@@ -825,7 +2062,15 @@ function CopyablePromptCard({ content }) {
 }
 
 function MarkdownContent({ content }) {
-  return <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ pre: CopyableCodeBlock }}>{content}</ReactMarkdown>;
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm, remarkMath]}
+      rehypePlugins={[rehypeKatex]}
+      components={{ pre: CopyableCodeBlock }}
+    >
+      {content}
+    </ReactMarkdown>
+  );
 }
 
 function extractCodeSource(node) {
@@ -1145,12 +2390,517 @@ function buildSandboxedPreviewPage(previewDoc) {
 </html>`;
 }
 
+function cleanMermaidSource(source) {
+  if (!source) return '';
+  let cleaned = source.trim();
+  cleaned = cleaned.replace(/^```mermaid\s*/i, '').replace(/```\s*$/, '').trim();
+  return cleaned;
+}
+
+function downloadSvgDirect(svgElement, filename = 'diagram.svg') {
+  if (!svgElement) return;
+  try {
+    const clone = svgElement.cloneNode(true);
+    clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+    clone.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
+    const svgString = new XMLSerializer().serializeToString(clone);
+    const blob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    console.error('Failed to download SVG', err);
+  }
+}
+
+function downloadSvgAsPng(svgElement, filename = 'diagram.png', isDark = true) {
+  if (!svgElement) return;
+  try {
+    const clone = svgElement.cloneNode(true);
+    clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+    clone.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
+    const svgString = new XMLSerializer().serializeToString(clone);
+    const blob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => {
+      const bbox = svgElement.getBoundingClientRect();
+      const scale = 2;
+      const width = Math.max((bbox.width || 800) * scale, 600);
+      const height = Math.max((bbox.height || 600) * scale, 400);
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = isDark ? '#111113' : '#ffffff';
+      ctx.fillRect(0, 0, width, height);
+      ctx.drawImage(img, 0, 0, width, height);
+      const pngUrl = canvas.toDataURL('image/png');
+      const a = document.createElement('a');
+      a.href = pngUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    };
+    img.src = url;
+  } catch (err) {
+    console.error('Failed to download PNG', err);
+  }
+}
+
+function MermaidRenderer({ source, theme = 'dark', inCanvas = false, onOpenFullscreen }) {
+  const containerRef = useRef(null);
+  const svgWrapperRef = useRef(null);
+  const [svgHtml, setSvgHtml] = useState('');
+  const [error, setError] = useState(null);
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [isPanning, setIsPanning] = useState(false);
+  const panStartRef = useRef({ x: 0, y: 0 });
+
+  useEffect(() => {
+    let isMounted = true;
+    const renderDiagram = async () => {
+      if (!source || !source.trim()) return;
+      try {
+        const cleanCode = cleanMermaidSource(source);
+        mermaid.initialize({
+          startOnLoad: false,
+          theme: theme === 'light' ? 'neutral' : 'dark',
+          securityLevel: 'loose',
+          fontFamily: 'Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+          themeVariables: theme === 'light' ? {
+            primaryColor: '#e0e7ff',
+            primaryTextColor: '#1e1b4b',
+            primaryBorderColor: '#6366f1',
+            lineColor: '#4f46e5',
+            secondaryColor: '#f3e8ff',
+            tertiaryColor: '#ffffff',
+            background: '#ffffff',
+            fontSize: '13px',
+          } : {
+            primaryColor: '#2e1065',
+            primaryTextColor: '#f5f3ff',
+            primaryBorderColor: '#8b5cf6',
+            lineColor: '#a78bfa',
+            secondaryColor: '#1e1b4b',
+            tertiaryColor: '#18181b',
+            background: '#111113',
+            fontSize: '13px',
+          }
+        });
+
+        const id = `mermaid-svg-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+        const { svg } = await mermaid.render(id, cleanCode);
+        if (isMounted) {
+          setSvgHtml(svg);
+          setError(null);
+        }
+      } catch (err) {
+        if (isMounted) {
+          console.warn('Mermaid render error:', err);
+          setError(err?.message || 'Could not parse Mermaid diagram syntax');
+        }
+      }
+    };
+
+    renderDiagram();
+    return () => { isMounted = false; };
+  }, [source, theme]);
+
+  const handleZoom = (delta) => {
+    setZoom(z => Math.max(0.4, Math.min(3, +(z + delta).toFixed(2))));
+  };
+
+  const handleReset = () => {
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+  };
+
+  const handleMouseDown = (e) => {
+    if (e.button !== 0) return;
+    setIsPanning(true);
+    panStartRef.current = { x: e.clientX - pan.x, y: e.clientY - pan.y };
+  };
+
+  const handleMouseMove = (e) => {
+    if (!isPanning) return;
+    setPan({ x: e.clientX - panStartRef.current.x, y: e.clientY - panStartRef.current.y });
+  };
+
+  const handleMouseUp = () => setIsPanning(false);
+
+  const handleDownloadSvg = () => {
+    const svg = svgWrapperRef.current?.querySelector('svg');
+    if (svg) downloadSvgDirect(svg, `diagram-${Date.now().toString(36)}.svg`);
+  };
+
+  const handleDownloadPng = () => {
+    const svg = svgWrapperRef.current?.querySelector('svg');
+    if (svg) downloadSvgAsPng(svg, `diagram-${Date.now().toString(36)}.png`, theme !== 'light');
+  };
+
+  return (
+    <div
+      ref={containerRef}
+      className={`mermaid-diagram-wrap ${inCanvas ? 'in-canvas' : ''} ${isPanning ? 'is-dragging' : ''}`}
+      onMouseDown={handleMouseDown}
+      onMouseMove={handleMouseMove}
+      onMouseUp={handleMouseUp}
+      onMouseLeave={handleMouseUp}
+    >
+      <div className="mermaid-floating-toolbar" onClick={e => e.stopPropagation()}>
+        <div className="mermaid-zoom-group">
+          <button
+            type="button"
+            className="icon-btn mini"
+            title="Zoom in"
+            aria-label="Zoom in"
+            onClick={() => handleZoom(0.25)}
+          >
+            <ZoomIn size={14} />
+          </button>
+          <span className="mermaid-zoom-indicator" title="Current zoom level">
+            {Math.round(zoom * 100)}%
+          </span>
+          <button
+            type="button"
+            className="icon-btn mini"
+            title="Zoom out"
+            aria-label="Zoom out"
+            onClick={() => handleZoom(-0.25)}
+          >
+            <ZoomOut size={14} />
+          </button>
+          <button
+            type="button"
+            className="icon-btn mini"
+            title="Reset zoom & position"
+            aria-label="Reset zoom"
+            onClick={handleReset}
+          >
+            <RotateCcw size={13} />
+          </button>
+        </div>
+        <div className="mermaid-export-group">
+          <button
+            type="button"
+            className="mermaid-export-pill"
+            title="Download SVG vector graphic"
+            onClick={handleDownloadSvg}
+          >
+            <Download size={12} />
+            <span>SVG</span>
+          </button>
+          <button
+            type="button"
+            className="mermaid-export-pill"
+            title="Download PNG image"
+            onClick={handleDownloadPng}
+          >
+            <Download size={12} />
+            <span>PNG</span>
+          </button>
+          {onOpenFullscreen && (
+            <button
+              type="button"
+              className="icon-btn mini"
+              title="Fullscreen diagram"
+              aria-label="Fullscreen diagram"
+              onClick={onOpenFullscreen}
+            >
+              <Maximize2 size={14} />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {error ? (
+        <div className="mermaid-error-notice">
+          <AlertCircle size={18} />
+          <div className="mermaid-error-copy">
+            <b>Mermaid syntax preview</b>
+            <small>{error}</small>
+          </div>
+        </div>
+      ) : svgHtml ? (
+        <div
+          ref={svgWrapperRef}
+          className="mermaid-svg-container"
+          style={{
+            transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+            transformOrigin: 'center center',
+          }}
+          dangerouslySetInnerHTML={{ __html: svgHtml }}
+        />
+      ) : (
+        <div className="mermaid-loading-state">
+          <LoaderCircle size={20} className="spin" />
+          <span>Rendering diagram…</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+let pyodideInstancePromise = null;
+
+async function getPyodideRuntime() {
+  if (window.__forma_pyodide_instance) {
+    return window.__forma_pyodide_instance;
+  }
+  if (!pyodideInstancePromise) {
+    pyodideInstancePromise = (async () => {
+      if (!window.loadPyodide) {
+        await new Promise((resolve, reject) => {
+          const script = document.createElement('script');
+          script.src = 'https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js';
+          script.onload = resolve;
+          script.onerror = () => reject(new Error('Failed to load Pyodide WebAssembly runtime from CDN. Check your internet connection.'));
+          document.head.appendChild(script);
+        });
+      }
+      const pyodide = await window.loadPyodide({
+        indexURL: 'https://cdn.jsdelivr.net/pyodide/v0.26.4/full/',
+      });
+      window.__forma_pyodide_instance = pyodide;
+      return pyodide;
+    })();
+  }
+  return pyodideInstancePromise;
+}
+
+async function executePythonScript(code) {
+  const t0 = performance.now();
+  let stdout = '';
+  let stderr = '';
+  const plots = [];
+
+  const pyodide = await getPyodideRuntime();
+
+  pyodide.setStdout({
+    batched: (text) => {
+      stdout += (stdout ? '\n' : '') + text;
+    }
+  });
+  pyodide.setStderr({
+    batched: (text) => {
+      stderr += (stderr ? '\n' : '') + text;
+    }
+  });
+
+  try {
+    if (pyodide.loadPackagesFromImports) {
+      await pyodide.loadPackagesFromImports(code);
+    }
+  } catch (pkgErr) {
+    console.warn('Auto package loading notice:', pkgErr);
+  }
+
+  const hasMatplotlib = /\bmatplotlib\b|\bplt\b/.test(code);
+  if (hasMatplotlib) {
+    try {
+      await pyodide.runPythonAsync(`
+import sys
+try:
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    plt.close('all')
+except Exception:
+    pass
+`);
+    } catch {}
+  }
+
+  let result = null;
+  let error = null;
+
+  try {
+    result = await pyodide.runPythonAsync(code);
+
+    if (hasMatplotlib) {
+      try {
+        const plotDataList = await pyodide.runPythonAsync(`
+import io, base64
+_captured_plots = []
+try:
+    import matplotlib.pyplot as plt
+    for _fignum in plt.get_fignums():
+        _fig = plt.figure(_fignum)
+        _buf = io.BytesIO()
+        _fig.savefig(_buf, format='png', bbox_inches='tight', dpi=130, facecolor='#111827', edgecolor='none')
+        _buf.seek(0)
+        _captured_plots.append(base64.b64encode(_buf.read()).decode('ascii'))
+    plt.close('all')
+except Exception:
+    pass
+_captured_plots
+`);
+        if (plotDataList && plotDataList.toJs) {
+          const jsPlots = plotDataList.toJs();
+          for (const p of jsPlots) {
+            plots.push(`data:image/png;base64,${p}`);
+          }
+        }
+      } catch (pltErr) {
+        console.warn('Matplotlib plot extraction error:', pltErr);
+      }
+    }
+  } catch (err) {
+    error = err?.message || String(err);
+  }
+
+  const duration = Math.round(performance.now() - t0);
+
+  return {
+    stdout: stdout.trim(),
+    stderr: stderr.trim(),
+    result: result !== undefined && result !== null ? String(result) : null,
+    plots,
+    error,
+    duration,
+  };
+}
+
+function PythonOutputDrawer({ output, isRunning, onRerun, onClear, onClose }) {
+  if (!output && !isRunning) return null;
+
+  const downloadPlot = (plotDataUrl, index) => {
+    const a = document.createElement('a');
+    a.href = plotDataUrl;
+    a.download = `python-plot-${index + 1}-${Date.now().toString(36)}.png`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  };
+
+  return (
+    <div className="python-sandbox-drawer" role="region" aria-label="Python sandbox output">
+      <header className="python-drawer-header">
+        <div className="python-drawer-title-group">
+          <Terminal size={14} className="python-terminal-icon" />
+          <span className="python-drawer-title">Python 3.12 (WASM)</span>
+          {isRunning ? (
+            <span className="python-status-pill running">
+              <LoaderCircle size={11} className="spin" /> Executing…
+            </span>
+          ) : output?.error ? (
+            <span className="python-status-pill error">
+              Failed ({output.duration}ms)
+            </span>
+          ) : (
+            <span className="python-status-pill success">
+              Done ({output?.duration}ms)
+            </span>
+          )}
+        </div>
+        <div className="python-drawer-actions">
+          {onRerun && !isRunning && (
+            <button
+              type="button"
+              className="python-action-btn"
+              onClick={onRerun}
+              title="Re-run Python script"
+              aria-label="Re-run Python script"
+            >
+              <RotateCcw size={12} />
+              <span>Run again</span>
+            </button>
+          )}
+          {onClear && (
+            <button
+              type="button"
+              className="python-action-btn"
+              onClick={onClear}
+              title="Clear output"
+              aria-label="Clear output"
+            >
+              <Trash2 size={12} />
+              <span>Clear</span>
+            </button>
+          )}
+          {onClose && (
+            <button
+              type="button"
+              className="python-action-btn icon-only"
+              onClick={onClose}
+              title="Close output drawer"
+              aria-label="Close output drawer"
+            >
+              <X size={14} />
+            </button>
+          )}
+        </div>
+      </header>
+
+      <div className="python-drawer-body">
+        {isRunning && (!output || (!output.stdout && !output.error && !output.plots?.length)) && (
+          <div className="python-running-placeholder">
+            <LoaderCircle size={16} className="spin" />
+            <span>Running script in WebAssembly environment…</span>
+          </div>
+        )}
+
+        {output && (
+          <>
+            {output.stdout && (
+              <pre className="python-console-stdout">{output.stdout}</pre>
+            )}
+
+            {output.result && !output.stdout && !output.error && (
+              <div className="python-result-row">
+                <span className="python-result-label">Output:</span>
+                <code>{output.result}</code>
+              </div>
+            )}
+
+            {output.error && (
+              <pre className="python-traceback">{output.error}</pre>
+            )}
+
+            {output.plots && output.plots.length > 0 && (
+              <div className="python-plots-gallery">
+                {output.plots.map((plotUrl, idx) => (
+                  <div key={idx} className="python-plot-card">
+                    <div className="python-plot-bar">
+                      <span className="python-plot-label">Figure {idx + 1}</span>
+                      <button
+                        type="button"
+                        className="python-plot-download-btn"
+                        onClick={() => downloadPlot(plotUrl, idx)}
+                        title="Download high-resolution plot PNG"
+                      >
+                        <Download size={13} />
+                        <span>Save PNG</span>
+                      </button>
+                    </div>
+                    <img src={plotUrl} alt={`Matplotlib plot ${idx + 1}`} className="python-plot-image" />
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function CopyableCodeBlock({ children }) {
   const [copied, setCopied] = useState(false);
-  const [viewMode, setViewMode] = useState('code');
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [viewport, setViewport] = useState('desktop');
   const [refreshKey, setRefreshKey] = useState(0);
+
+  const { canvasArtifact, openCanvas, theme } = useContext(CanvasContext);
 
   const codeNode = Array.isArray(children) ? children[0] : children;
   const className = codeNode?.props?.className || '';
@@ -1158,9 +2908,51 @@ function CopyableCodeBlock({ children }) {
   const source = extractCodeSource(codeNode?.props?.children).replace(/\n$/, '');
 
   const langLower = language.toLowerCase();
+  const isMermaid = langLower === 'mermaid';
+  const isPython = ['python', 'py'].includes(langLower);
   const isExplicitHtml = ['html', 'htm', 'svg'].includes(langLower);
   const isMarkup = /^\s*<!DOCTYPE\s+html/i.test(source) || /^\s*<html[\s>]/i.test(source) || (/<\/?[a-z][\s\S]*>/i.test(source) && ['xml', 'markup', 'code', ''].includes(langLower));
-  const isPreviewable = isExplicitHtml || isMarkup;
+  const isPreviewable = isExplicitHtml || isMarkup || isMermaid;
+
+  const [viewMode, setViewMode] = useState(isMermaid ? 'preview' : 'code');
+  const [pythonOutput, setPythonOutput] = useState(null);
+  const [pythonRunning, setPythonRunning] = useState(false);
+
+  const handleRunPython = async () => {
+    if (pythonRunning) return;
+    setPythonRunning(true);
+    try {
+      const res = await executePythonScript(source);
+      setPythonOutput(res);
+    } catch (e) {
+      setPythonOutput({ error: e?.message || String(e), duration: 0 });
+    } finally {
+      setPythonRunning(false);
+    }
+  };
+
+  const codeBlockId = useMemo(() => {
+    let hash = 0;
+    for (let i = 0; i < Math.min(source.length, 120); i++) {
+      hash = ((hash << 5) - hash) + source.charCodeAt(i);
+      hash |= 0;
+    }
+    return `code-${hash}-${source.length}`;
+  }, [source]);
+
+  const isThisInCanvas = canvasArtifact && canvasArtifact.id === codeBlockId;
+
+  const handleOpenCanvas = () => {
+    openCanvas({
+      id: codeBlockId,
+      title: isMermaid ? 'Mermaid Diagram' : isPreviewable ? `${language.toUpperCase()} Web App` : `${language} Snippet`,
+      language,
+      source,
+      isPreviewable,
+      viewMode: 'preview',
+      viewport: 'desktop',
+    });
+  };
 
   const closePreview = () => {
     setIsFullscreen(false);
@@ -1208,18 +3000,18 @@ function CopyableCodeBlock({ children }) {
 
   const downloadFile = () => {
     const extMap = {
-      html: 'html', htm: 'html', svg: 'svg', javascript: 'js', js: 'js',
+      html: 'html', htm: 'html', svg: 'svg', mermaid: 'mmd', javascript: 'js', js: 'js',
       typescript: 'ts', ts: 'ts', css: 'css', json: 'json', python: 'py',
       py: 'py', markdown: 'md', md: 'md', sh: 'sh', bash: 'sh', sql: 'sql'
     };
-    const ext = extMap[langLower] || (isPreviewable ? 'html' : 'txt');
+    const ext = extMap[langLower] || (isMermaid ? 'mmd' : isPreviewable ? 'html' : 'txt');
     const mime = ext === 'html' ? 'text/html' : ext === 'svg' ? 'image/svg+xml' : 'text/plain';
     const content = isPreviewable && (langLower === 'html' || langLower === 'htm') ? buildHtmlPreviewDoc(source) : source;
     const blob = new Blob([content], { type: mime });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `forma-${Date.now().toString(36)}.${ext}`;
+    a.download = `forma-${isMermaid ? 'diagram' : Date.now().toString(36)}.${ext}`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -1227,49 +3019,112 @@ function CopyableCodeBlock({ children }) {
   };
 
   return (
-    <div className={`copyable-code-card ${isPreviewable ? 'has-preview' : ''}`}>
+    <div className={`copyable-code-card ${isPreviewable ? 'has-preview' : ''} ${isMermaid ? 'mermaid-card' : ''}`}>
       <header className="copyable-card-head html-card-head">
         <div className="code-head-left">
-          <span className="code-lang-tag">{language}</span>
+          <span className="code-lang-tag">{isMermaid ? 'DIAGRAM' : language}</span>
           {isPreviewable && (
             <div className="code-view-tabs" role="tablist" aria-label="Code display mode">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={viewMode === 'code'}
-                className={`code-view-tab ${viewMode === 'code' ? 'active' : ''}`}
-                onClick={() => switchMode('code')}
-                title="View HTML Source Code"
-              >
-                <Code2 size={13} />
-                <span>Code</span>
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={viewMode === 'preview'}
-                className={`code-view-tab ${viewMode === 'preview' ? 'active' : ''}`}
-                onClick={() => switchMode('preview')}
-                title="Live HTML Preview"
-              >
-                <Play size={13} />
-                <span>Preview</span>
-              </button>
+              {isMermaid ? (
+                <>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={viewMode === 'preview'}
+                    className={`code-view-tab ${viewMode === 'preview' ? 'active' : ''}`}
+                    onClick={() => switchMode('preview')}
+                    title="Rendered Diagram"
+                  >
+                    <GitBranch size={13} />
+                    <span>Diagram</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={viewMode === 'code'}
+                    className={`code-view-tab ${viewMode === 'code' ? 'active' : ''}`}
+                    onClick={() => switchMode('code')}
+                    title="View Mermaid Syntax"
+                  >
+                    <Code2 size={13} />
+                    <span>Code</span>
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={viewMode === 'code'}
+                    className={`code-view-tab ${viewMode === 'code' ? 'active' : ''}`}
+                    onClick={() => switchMode('code')}
+                    title="View HTML Source Code"
+                  >
+                    <Code2 size={13} />
+                    <span>Code</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={viewMode === 'preview'}
+                    className={`code-view-tab ${viewMode === 'preview' ? 'active' : ''}`}
+                    onClick={() => switchMode('preview')}
+                    title="Live HTML Preview"
+                  >
+                    <Play size={13} />
+                    <span>Preview</span>
+                  </button>
+                </>
+              )}
             </div>
           )}
         </div>
         <div className="copyable-card-actions">
+          {isPython && (
+            <button
+              type="button"
+              className={`code-action-btn python-run-btn ${pythonRunning ? 'is-running' : ''}`}
+              title="Run in browser WebAssembly Python sandbox"
+              aria-label="Run Python script"
+              onClick={handleRunPython}
+              disabled={pythonRunning}
+            >
+              {pythonRunning ? (
+                <>
+                  <LoaderCircle size={13} className="spin" />
+                  <span className="python-btn-text">Running…</span>
+                </>
+              ) : (
+                <>
+                  <Play size={12} fill="currentColor" />
+                  <span className="python-btn-text">Run</span>
+                </>
+              )}
+            </button>
+          )}
+          <button
+            type="button"
+            className={`code-action-btn canvas-trigger-btn ${isThisInCanvas ? 'active' : ''}`}
+            title={isThisInCanvas ? 'Artifact is open in Side-by-Side Canvas' : 'Open in Side-by-Side Canvas'}
+            aria-label="Open in Side-by-Side Canvas"
+            onClick={handleOpenCanvas}
+          >
+            <Columns2 size={14} />
+            <span className="canvas-btn-text">Canvas</span>
+          </button>
           {isPreviewable && viewMode === 'preview' && (
             <>
-              <button
-                type="button"
-                className="code-action-btn"
-                title="Refresh preview"
-                aria-label="Refresh preview"
-                onClick={() => setRefreshKey(k => k + 1)}
-              >
-                <RotateCcw size={15} />
-              </button>
+              {!isMermaid && (
+                <button
+                  type="button"
+                  className="code-action-btn"
+                  title="Refresh preview"
+                  aria-label="Refresh preview"
+                  onClick={() => setRefreshKey(k => k + 1)}
+                >
+                  <RotateCcw size={15} />
+                </button>
+              )}
               <button
                 type="button"
                 className="code-action-btn"
@@ -1279,21 +3134,23 @@ function CopyableCodeBlock({ children }) {
               >
                 <Maximize2 size={15} />
               </button>
-              <button
-                type="button"
-                className="code-action-btn"
-                title="Open preview in new tab"
-                aria-label="Open preview in new tab"
-                onClick={openInNewTab}
-              >
-                <ExternalLink size={15} />
-              </button>
+              {!isMermaid && (
+                <button
+                  type="button"
+                  className="code-action-btn"
+                  title="Open preview in new tab"
+                  aria-label="Open preview in new tab"
+                  onClick={openInNewTab}
+                >
+                  <ExternalLink size={15} />
+                </button>
+              )}
             </>
           )}
           <button
             type="button"
             className="code-action-btn"
-            title={isPreviewable ? "Download HTML file" : "Download code file"}
+            title={isMermaid ? "Download Mermaid diagram file (.mmd)" : isPreviewable ? "Download HTML file" : "Download code file"}
             aria-label="Download code"
             onClick={downloadFile}
           >
@@ -1312,15 +3169,23 @@ function CopyableCodeBlock({ children }) {
       </header>
 
       {isPreviewable && viewMode === 'preview' ? (
-        <div className="html-inline-preview-wrap">
-          <iframe
-            key={`inline-${refreshKey}`}
-            title="HTML Live Preview"
-            srcDoc={buildHtmlPreviewDoc(source)}
-            sandbox="allow-scripts allow-modals allow-forms allow-popups"
-            className="html-preview-iframe"
+        isMermaid ? (
+          <MermaidRenderer
+            source={source}
+            theme={theme}
+            onOpenFullscreen={openFullscreen}
           />
-        </div>
+        ) : (
+          <div className="html-inline-preview-wrap">
+            <iframe
+              key={`inline-${refreshKey}`}
+              title="HTML Live Preview"
+              srcDoc={buildHtmlPreviewDoc(source)}
+              sandbox="allow-scripts allow-modals allow-forms allow-popups"
+              className="html-preview-iframe"
+            />
+          </div>
+        )
       ) : (
         <div
           className="code-scroll-region"
@@ -1332,54 +3197,70 @@ function CopyableCodeBlock({ children }) {
         </div>
       )}
 
+      {isPython && (pythonOutput || pythonRunning) && (
+        <PythonOutputDrawer
+          output={pythonOutput}
+          isRunning={pythonRunning}
+          onRerun={handleRunPython}
+          onClear={() => setPythonOutput(null)}
+          onClose={() => setPythonOutput(null)}
+        />
+      )}
+
       {isFullscreen && (
         <div
           className="prompt-preview-backdrop html-modal-backdrop"
           role="presentation"
           onMouseDown={e => { if (e.target === e.currentTarget) closePreview(); }}
         >
-          <section className="prompt-preview-dialog html-preview-modal-dialog" role="dialog" aria-modal="true" aria-label="Interactive HTML Sandbox">
+          <section className="prompt-preview-dialog html-preview-modal-dialog" role="dialog" aria-modal="true" aria-label={isMermaid ? "Interactive Diagram Sandbox" : "Interactive HTML Sandbox"}>
             <header className="copyable-card-head html-modal-head">
               <div className="html-modal-title-group">
-                <span className="html-modal-badge">Interactive Preview</span>
-                <div className="html-viewport-switcher" role="group" aria-label="Device viewport">
-                  <button
-                    type="button"
-                    className={`viewport-btn ${viewport === 'desktop' ? 'active' : ''}`}
-                    title="Desktop view (100%)"
-                    onClick={() => setViewport('desktop')}
-                  >
-                    <Monitor size={14} />
-                    <span>Desktop</span>
-                  </button>
-                  <button
-                    type="button"
-                    className={`viewport-btn ${viewport === 'tablet' ? 'active' : ''}`}
-                    title="Tablet view (768px)"
-                    onClick={() => setViewport('tablet')}
-                  >
-                    <Tablet size={14} />
-                    <span>Tablet</span>
-                  </button>
-                  <button
-                    type="button"
-                    className={`viewport-btn ${viewport === 'mobile' ? 'active' : ''}`}
-                    title="Mobile view (375px)"
-                    onClick={() => setViewport('mobile')}
-                  >
-                    <Smartphone size={14} />
-                    <span>Mobile</span>
-                  </button>
-                </div>
+                <span className="html-modal-badge">{isMermaid ? 'Interactive Diagram' : 'Interactive Preview'}</span>
+                {!isMermaid && (
+                  <div className="html-viewport-switcher" role="group" aria-label="Device viewport">
+                    <button
+                      type="button"
+                      className={`viewport-btn ${viewport === 'desktop' ? 'active' : ''}`}
+                      title="Desktop view (100%)"
+                      onClick={() => setViewport('desktop')}
+                    >
+                      <Monitor size={14} />
+                      <span>Desktop</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`viewport-btn ${viewport === 'tablet' ? 'active' : ''}`}
+                      title="Tablet view (768px)"
+                      onClick={() => setViewport('tablet')}
+                    >
+                      <Tablet size={14} />
+                      <span>Tablet</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`viewport-btn ${viewport === 'mobile' ? 'active' : ''}`}
+                      title="Mobile view (375px)"
+                      onClick={() => setViewport('mobile')}
+                    >
+                      <Smartphone size={14} />
+                      <span>Mobile</span>
+                    </button>
+                  </div>
+                )}
               </div>
               <div className="copyable-card-actions">
-                <button title="Refresh preview" aria-label="Refresh preview" onClick={() => setRefreshKey(k => k + 1)}>
-                  <RotateCcw size={16} />
-                </button>
-                <button title="Open in new browser tab" aria-label="Open in new browser tab" onClick={openInNewTab}>
-                  <ExternalLink size={16} />
-                </button>
-                <button title="Download HTML" aria-label="Download HTML" onClick={downloadFile}>
+                {!isMermaid && (
+                  <>
+                    <button title="Refresh preview" aria-label="Refresh preview" onClick={() => setRefreshKey(k => k + 1)}>
+                      <RotateCcw size={16} />
+                    </button>
+                    <button title="Open in new browser tab" aria-label="Open in new browser tab" onClick={openInNewTab}>
+                      <ExternalLink size={16} />
+                    </button>
+                  </>
+                )}
+                <button title="Download" aria-label="Download" onClick={downloadFile}>
                   <Download size={16} />
                 </button>
                 <button title="Close preview" aria-label="Close preview" onClick={closePreview}>
@@ -1387,16 +3268,22 @@ function CopyableCodeBlock({ children }) {
                 </button>
               </div>
             </header>
-            <div className={`html-modal-body viewport-${viewport}`}>
-              <div className="html-modal-frame-wrapper">
-                <iframe
-                  key={`modal-${refreshKey}`}
-                  title="HTML Fullscreen Preview"
-                  srcDoc={buildHtmlPreviewDoc(source)}
-                  sandbox="allow-scripts allow-modals allow-forms allow-popups"
-                  className="html-preview-iframe"
-                />
-              </div>
+            <div className={`html-modal-body ${isMermaid ? 'mermaid-fullscreen-modal-body' : `viewport-${viewport}`}`}>
+              {isMermaid ? (
+                <div className="fullscreen-mermaid-wrap">
+                  <MermaidRenderer source={source} theme={theme} inCanvas={true} />
+                </div>
+              ) : (
+                <div className="html-modal-frame-wrapper">
+                  <iframe
+                    key={`modal-${refreshKey}`}
+                    title="HTML Fullscreen Preview"
+                    srcDoc={buildHtmlPreviewDoc(source)}
+                    sandbox="allow-scripts allow-modals allow-forms allow-popups"
+                    className="html-preview-iframe"
+                  />
+                </div>
+              )}
             </div>
           </section>
         </div>

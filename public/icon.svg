@@ -1,0 +1,99 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-labelledby="title desc">
+  <title id="title">Forma — Personal AI</title>
+  <desc id="desc">A friendly white robot with glowing cyan eyes inside a blue and cyan speech bubble.</desc>
+  <defs>
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0e131f"/>
+      <stop offset=".5" stop-color="#080c14"/>
+      <stop offset="1" stop-color="#04060a"/>
+    </linearGradient>
+    <linearGradient id="bubble" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#53f5ff"/>
+      <stop offset=".42" stop-color="#1264ff"/>
+      <stop offset="1" stop-color="#22eaff"/>
+    </linearGradient>
+    <linearGradient id="shell" x1=".15" y1="0" x2=".8" y2="1">
+      <stop offset="0" stop-color="#fff"/>
+      <stop offset=".45" stop-color="#e8f3ff"/>
+      <stop offset="1" stop-color="#91b8f7"/>
+    </linearGradient>
+    <linearGradient id="visor" x1="0" y1="0" x2=".8" y2="1">
+      <stop offset="0" stop-color="#07122f"/>
+      <stop offset=".6" stop-color="#020819"/>
+      <stop offset="1" stop-color="#101f4c"/>
+    </linearGradient>
+    <linearGradient id="ear" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fff"/>
+      <stop offset=".55" stop-color="#8bb8ff"/>
+      <stop offset="1" stop-color="#087cff"/>
+    </linearGradient>
+    <radialGradient id="orb" cx=".32" cy=".25" r=".8">
+      <stop offset="0" stop-color="#dfffff"/>
+      <stop offset=".35" stop-color="#69faff"/>
+      <stop offset="1" stop-color="#0786ff"/>
+    </radialGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="12" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="170%">
+      <feDropShadow dx="0" dy="15" stdDeviation="18" flood-color="#001e72" flood-opacity=".65"/>
+    </filter>
+  </defs>
+
+  <!-- Background squircle for PWA maskable and OS icon compliance -->
+  <rect width="1024" height="1024" rx="224" fill="url(#bgGrad)"/>
+  <rect width="1016" height="1016" x="4" y="4" rx="220" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="6"/>
+
+  <!-- Glowing outer ambient aura -->
+  <circle cx="512" cy="512" r="340" fill="url(#bubble)" opacity="0.18" filter="url(#glow)"/>
+
+  <!-- Speech bubble glow & outline -->
+  <g filter="url(#glow)" opacity=".28">
+    <path d="M640 170 C510 150 360 205 280 305 C196 410 190 548 240 650 C266 703 301 737 350 765 L333 840 L430 790 C530 825 645 802 725 735 C818 657 852 525 810 405 C790 347 755 302 713 274"
+      fill="none" stroke="#00cfff" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <path d="M635 174 C512 151 365 204 283 304 C200 405 188 537 235 643 C258 695 298 734 351 764 L333 840 L430 790 C531 825 646 801 726 734 C817 658 852 526 810 407 C790 350 756 307 714 276"
+    fill="none" stroke="url(#bubble)" stroke-width="29" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Antenna -->
+  <path d="M632 302 C647 263 667 235 688 211" fill="none" stroke="url(#shell)" stroke-width="19" stroke-linecap="round"/>
+  <circle cx="697" cy="202" r="35" fill="url(#orb)" stroke="#e8ffff" stroke-width="5" filter="url(#glow)"/>
+
+  <!-- Robot neck/body -->
+  <path d="M425 650 C444 620 478 612 512 619 L582 634 C618 642 645 669 656 704 L629 735 C583 763 497 762 449 735 L406 704 Z"
+    fill="url(#shell)" filter="url(#shadow)"/>
+  <path d="M455 675 C490 692 548 697 593 675 C584 705 553 719 520 719 C491 718 468 704 455 675Z" fill="#06163d"/>
+  <path d="M469 694 C503 710 549 711 580 693" fill="none" stroke="#28edff" stroke-width="7" stroke-linecap="round" filter="url(#glow)"/>
+
+  <!-- Side ear pieces -->
+  <path d="M340 411 C309 416 286 444 284 482 L282 535 C281 572 299 603 331 614 L370 600 L378 444 Z"
+    fill="#081536" stroke="#18264c" stroke-width="7"/>
+  <path d="M342 425 C312 436 305 462 306 500 L306 540 C308 569 322 589 347 591 L370 577 L369 444 Z"
+    fill="url(#ear)" stroke="#eaf7ff" stroke-width="7"/>
+  <ellipse cx="338" cy="508" rx="19" ry="47" fill="#073ba9" stroke="#4ff7ff" stroke-width="8" filter="url(#glow)"/>
+
+  <path d="M684 405 C720 414 741 445 744 482 L746 537 C745 572 728 601 697 613 L668 597 L660 445 Z"
+    fill="url(#ear)" stroke="#f1fbff" stroke-width="7"/>
+  <path d="M697 437 C719 450 723 474 723 506 L723 545 C719 566 710 580 694 588" fill="none" stroke="#16baff" stroke-width="9" stroke-linecap="round"/>
+
+  <!-- Main head shell -->
+  <path d="M350 411 C366 337 430 286 516 279 L593 279 C677 282 730 336 745 408 L759 523 C766 602 720 659 646 673 C578 686 461 686 397 669 C329 651 294 600 302 526 L312 459 C318 437 331 420 350 411Z"
+    fill="url(#shell)" stroke="#f6fbff" stroke-width="8" filter="url(#shadow)"/>
+
+  <!-- Visor -->
+  <path d="M390 399 C416 365 456 350 509 348 L594 346 C653 347 692 372 705 420 L718 517 C725 571 694 612 641 622 C579 635 475 635 418 620 C369 607 344 572 349 522 L359 450 C363 429 374 411 390 399Z"
+    fill="url(#visor)" stroke="#17254c" stroke-width="10"/>
+  <path d="M389 402 C421 372 461 362 510 360 L594 358 C641 358 674 375 690 409"
+    fill="none" stroke="#8bb9ff" stroke-opacity=".35" stroke-width="5" stroke-linecap="round"/>
+
+  <!-- Happy glowing eyes -->
+  <g fill="none" stroke="#22f2ff" stroke-width="17" stroke-linecap="round" filter="url(#glow)">
+    <path d="M419 511 C432 481 454 470 474 471 C493 472 507 485 516 501"/>
+    <path d="M584 486 C597 457 619 447 638 449 C657 451 670 464 678 480"/>
+  </g>
+  <g fill="none" stroke="#42ffff" stroke-width="10" stroke-linecap="round">
+    <path d="M419 511 C432 481 454 470 474 471 C493 472 507 485 516 501"/>
+    <path d="M584 486 C597 457 619 447 638 449 C657 451 670 464 678 480"/>
+  </g>
+</svg>
